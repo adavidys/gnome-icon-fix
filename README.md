@@ -1,4 +1,4 @@
-# gnome-icon-fix
+# [Gnome-Icon-Fix](https://extensions.gnome.org/extension/11492/icon-fix/)
 
 **Proper icons for Steam games and other apps in GNOME Shell. No `StartupWMClass` editing required.**
 
