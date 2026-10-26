@@ -8,7 +8,7 @@ import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
-import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
+import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {AppIndex, match, readProcess} from './matcher.js';
@@ -84,18 +84,13 @@ export default class IconFixExtension extends Extension {
 
     _patch() {
         const proto = Shell.App.prototype;
-        const orig = {
-            create_icon_texture: proto.create_icon_texture,
-            get_icon: proto.get_icon,
-            get_name: proto.get_name,
-        };
-        this._orig = orig;
         const ext = this;
+        this._injections = new InjectionManager();
 
-        proto.create_icon_texture = function (size) {
+        this._injections.overrideMethod(proto, 'create_icon_texture', original => function (size) {
             const found = ext._resolve(this);
             if (found?.app)
-                return orig.create_icon_texture.call(found.app, size);
+                return original.call(found.app, size);
             if (found?.gicon) {
                 return new St.Icon({
                     gicon: found.gicon,
@@ -103,29 +98,27 @@ export default class IconFixExtension extends Extension {
                     style_class: 'icon-dropshadow',
                 });
             }
-            return orig.create_icon_texture.call(this, size);
-        };
+            return original.call(this, size);
+        });
 
-        proto.get_icon = function () {
+        this._injections.overrideMethod(proto, 'get_icon', original => function () {
             const found = ext._resolve(this);
             if (found?.app)
-                return orig.get_icon.call(found.app);
-            return found?.gicon ?? orig.get_icon.call(this);
-        };
+                return original.call(found.app);
+            return found?.gicon ?? original.call(this);
+        });
 
-        proto.get_name = function () {
+        this._injections.overrideMethod(proto, 'get_name', original => function () {
             const found = ext._resolve(this);
             if (found?.app)
-                return orig.get_name.call(found.app);
-            return orig.get_name.call(this);
-        };
+                return original.call(found.app);
+            return original.call(this);
+        });
     }
 
     _unpatch() {
-        if (!this._orig)
-            return;
-        Object.assign(Shell.App.prototype, this._orig);
-        this._orig = null;
+        this._injections?.clear();
+        this._injections = null;
     }
 
     // Returns {app: Shell.App} or {gicon: Gio.Icon} for a window-backed

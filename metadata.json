@@ -1,7 +1,0 @@
-{
-  "uuid": "icon-fix@adavidys",
-  "name": "Icon Fix",
-  "description": "Gives windows that GNOME can't match to a .desktop file (Steam/Proton games, Wine, AppImages...) the proper icon and name, KDE-style, without editing StartupWMClass.",
-  "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
-  "version": 1
-}

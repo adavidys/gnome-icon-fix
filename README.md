@@ -27,3 +27,45 @@ When GNOME can't place a window, Icon Fix finds the matching `.desktop` file the
 - **Window title**, as a last resort.
 
 It works with the dock (including Dash to Dock), Alt+Tab and the overview, and has no measurable CPU impact.
+
+## Install
+
+**From GNOME Extensions (recommended):** [extensions.gnome.org/extension/11492/icon-fix](https://extensions.gnome.org/extension/11492/icon-fix/)
+
+**From source:**
+
+```bash
+git clone https://github.com/adavidys/gnome-icon-fix
+cd gnome-icon-fix
+make install
+```
+
+Log out and back in, then enable it:
+
+```bash
+gnome-extensions enable icon-fix@adavidys
+```
+
+Supports GNOME Shell 45 to 51.
+
+## Development
+
+```
+src/
+├── extension.js   # patches app icons/names for unmatched windows
+├── matcher.js     # .desktop matching heuristics (no Shell imports, testable with gjs)
+├── prefs.js       # preferences window
+├── metadata.json
+└── qr/            # donation QR codes
+```
+
+| Command | What it does |
+|---|---|
+| `make pack` | Builds `dist/icon-fix@adavidys.shell-extension.zip` for [extensions.gnome.org](https://extensions.gnome.org/upload/) |
+| `make install` | Builds and installs the extension for the current user |
+| `make uninstall` | Removes it |
+| `make clean` | Deletes `dist/` |
+
+## License
+
+[MIT](LICENSE)
