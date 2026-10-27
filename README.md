@@ -51,7 +51,7 @@ Turn on **Show Flatpak Steam games** in the extension's preferences (off by defa
 
 Shortcuts made with **Manage → Add desktop shortcut** (Flatpak Steam keeps them in its sandbox's `Desktop` folder) are mirrored too. For non-Steam games, Steam leaves the icon empty and names them `Game.exe`: the mirror takes the name from Steam's list of non-Steam games without the `.exe`, and the icon you picked in Steam or else the one inside the `.exe` (saved to `~/.local/share/icon-fix/icons`).
 
-The mirror stays in sync as you install or remove games. Icon Fix only writes and deletes files it generated itself. Turning the option off removes them.
+The mirror stays in sync as you install or remove games. Icon Fix only writes and deletes files it generated itself; the preferences list every one of them under **Created files**, with a button to show it in Files. Turning the option off removes them.
 
 ### Running games from Flatpak launchers
 

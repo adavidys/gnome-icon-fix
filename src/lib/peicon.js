@@ -239,7 +239,8 @@ export function exeInfo(path, dir = cacheDir()) {
     if (stamp === null)
         return null;
     const cached = known.get(`${dir}\n${path}`);
-    if (cached?.stamp === stamp)
+    // Its PNG may have been cleaned up since (see mirror/steam-flatpak.js).
+    if (cached?.stamp === stamp && (!cached.info?.icon || GLib.file_test(cached.info.icon, GLib.FileTest.EXISTS)))
         return cached.info;
 
     let info = null;

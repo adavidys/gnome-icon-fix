@@ -193,22 +193,52 @@ export class FlatpakSteamMirror {
             GLib.file_set_contents(path, data);
         }
 
-        // Game uninstalled: drop its mirror.
+        // Game uninstalled: drop its mirror, and icons nothing uses anymore.
         for (const name of listDir(this._target)) {
             if (!name.startsWith(PREFIX) || !name.endsWith('.desktop') || wanted.has(name))
                 continue;
             removeIfGenerated(GLib.build_filenamev([this._target, name]));
         }
+        const used = [...wanted.values()].join('\n');
+        for (const name of listDir(iconDir())) {
+            const path = GLib.build_filenamev([iconDir(), name]);
+            if (!used.includes(`Icon=${path}\n`))
+                GLib.unlink(path);
+        }
     }
 
     // Used when the setting is switched off.
     static removeAll() {
-        const target = GLib.build_filenamev([GLib.get_user_data_dir(), 'applications']);
-        for (const name of listDir(target)) {
-            if (name.startsWith(PREFIX) && name.endsWith('.desktop'))
-                removeIfGenerated(GLib.build_filenamev([target, name]));
-        }
+        for (const file of generatedFiles())
+            GLib.unlink(file.path);
     }
+}
+
+// Every file the mirror made (shortcuts with our marker, and the icons it
+// took from .exe files), for the preferences window and removeAll().
+// [{path, name, icon, kind: 'shortcut' | 'icon'}]; icon: path or icon name.
+export function generatedFiles() {
+    const files = [];
+    const target = GLib.build_filenamev([GLib.get_user_data_dir(), 'applications']);
+    for (const name of listDir(target)) {
+        if (!name.startsWith(PREFIX) || !name.endsWith('.desktop'))
+            continue;
+        const path = GLib.build_filenamev([target, name]);
+        const data = readText(path);
+        if (data === null || !isGenerated(data))
+            continue;
+        files.push({
+            path,
+            name: data.match(/^Name=(.*)$/m)?.[1] ?? name,
+            icon: data.match(/^Icon=(.+)$/m)?.[1] ?? null,
+            kind: 'shortcut',
+        });
+    }
+    for (const name of listDir(iconDir())) {
+        const path = GLib.build_filenamev([iconDir(), name]);
+        files.push({path, name, icon: path, kind: 'icon'});
+    }
+    return files;
 }
 
 function isGenerated(data) {

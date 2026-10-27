@@ -1,13 +1,16 @@
 // Preferences window: a General page with the optional Flatpak Steam
-// support, and a support page with a coin switcher, QR code and copyable
-// address.
+// support and the files it created, and a support page with a coin
+// switcher, QR code and copyable address.
 
 import Adw from 'gi://Adw';
 import Gdk from 'gi://Gdk';
 import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk';
 
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
+
+import {generatedFiles} from './mirror/steam-flatpak.js';
 
 // QR codes in qr/ are generated from these addresses (qrencode -l M -m 2).
 const COINS = [
@@ -35,6 +38,9 @@ const COINS = [
 ];
 
 const QR_SIZE = 220;
+
+// The mirror writes in the Shell's process; let it settle before rereading.
+const REFRESH_DELAY_MS = 500;
 
 const CSS = `
 .icon-fix-qr {
@@ -75,6 +81,7 @@ export default class IconFixPreferences extends ExtensionPreferences {
         this.getSettings().bind('flatpak-steam', flatpakRow, 'active',
             Gio.SettingsBindFlags.DEFAULT);
         flatpakGroup.add(flatpakRow);
+        flatpakGroup.add(this._createdFilesRow(window));
 
         const page = new Adw.PreferencesPage({
             title: 'Support',
@@ -153,4 +160,90 @@ export default class IconFixPreferences extends ExtensionPreferences {
             window.add_toast(new Adw.Toast({title: `${coin.label} copied`, timeout: 2}));
         });
     }
+
+    // Every file the Flatpak Steam mirror made, kept up to date while the
+    // window is open.
+    _createdFilesRow(window) {
+        const expander = new Adw.ExpanderRow({
+            title: 'Created files',
+            subtitle_lines: 1,
+        });
+        let rows = [];
+        const refresh = () => {
+            for (const row of rows)
+                expander.remove(row);
+            const files = generatedFiles();
+            rows = files.map(file => this._fileRow(window, file));
+            for (const row of rows)
+                expander.add_row(row);
+            const shortcuts = files.filter(f => f.kind === 'shortcut').length;
+            const icons = files.length - shortcuts;
+            expander.subtitle = files.length
+                ? `${plural(shortcuts, 'shortcut')}${icons ? `, ${plural(icons, 'icon')}` : ''}, all removed when switched off`
+                : 'None: Icon Fix hasn\'t created any files';
+            expander.enable_expansion = files.length > 0;
+            if (!files.length)
+                expander.expanded = false;
+        };
+        refresh();
+
+        let timeoutId = 0;
+        const queueRefresh = () => {
+            if (timeoutId)
+                GLib.source_remove(timeoutId);
+            timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, REFRESH_DELAY_MS, () => {
+                timeoutId = 0;
+                refresh();
+                return GLib.SOURCE_REMOVE;
+            });
+        };
+        const monitors = [
+            GLib.build_filenamev([GLib.get_user_data_dir(), 'applications']),
+            GLib.build_filenamev([GLib.get_user_data_dir(), 'icon-fix', 'icons']),
+        ].map(path => {
+            try {
+                const monitor = Gio.File.new_for_path(path).monitor_directory(Gio.FileMonitorFlags.NONE, null);
+                monitor.connect('changed', queueRefresh);
+                return monitor;
+            } catch {
+                return null;
+            }
+        });
+        window.connect('close-request', () => {
+            monitors.forEach(m => m?.cancel());
+            if (timeoutId)
+                GLib.source_remove(timeoutId);
+            timeoutId = 0;
+            return false;
+        });
+        return expander;
+    }
+
+    _fileRow(window, file) {
+        const row = new Adw.ActionRow({
+            title: file.kind === 'icon' ? 'Icon taken from a game\'s .exe' : file.name,
+            subtitle: file.path,
+            subtitle_selectable: true,
+            use_markup: false,
+        });
+        const icon = file.icon?.startsWith('/')
+            ? new Gio.FileIcon({file: Gio.File.new_for_path(file.icon)})
+            : new Gio.ThemedIcon({name: file.icon ?? 'application-x-executable'});
+        row.add_prefix(new Gtk.Image({gicon: icon, pixel_size: 32}));
+
+        const open = new Gtk.Button({
+            icon_name: 'folder-open-symbolic',
+            tooltip_text: 'Show in Files',
+            valign: Gtk.Align.CENTER,
+            css_classes: ['flat'],
+        });
+        open.connect('clicked', () => new Gtk.FileLauncher({file: Gio.File.new_for_path(file.path)})
+            .open_containing_folder(window, null, null));
+        row.add_suffix(open);
+        return row;
+    }
+}
+
+function plural(n, word) {
+    return `${n} ${word}${n === 1 ? '' : 's'}`;
 }
