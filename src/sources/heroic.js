@@ -5,12 +5,15 @@
 // game is told apart by HEROIC_APP_NAME (exported by recent Heroic
 // versions) or by its install folder from the stores' installed.json.
 
+import {guessPaths} from '../lib/matcher.js';
 import {StampCache, canonical, configDir, exists, home, isSpecificDir, isUnder, pathKey, readJson} from '../lib/util.js';
+
+const SANDBOX = 'com.heroicgameslauncher.hgl';
 
 function roots() {
     return [
         configDir('heroic'),
-        home('.var', 'app', 'com.heroicgameslauncher.hgl', 'config', 'heroic'),
+        home('.var', 'app', SANDBOX, 'config', 'heroic'),
     ];
 }
 
@@ -65,6 +68,7 @@ export function installedGames(json) {
 export class HeroicSource {
     constructor() {
         this.name = 'heroic';
+        this.sandbox = SANDBOX;
         this.envKeys = ['HEROIC_APP_NAME'];
         this._installed = new StampCache(path => installedGames(readJson(path)));
     }
@@ -75,6 +79,10 @@ export class HeroicSource {
             return false;
         index.add(index.map('heroic'), decode(m[1] ?? m[2]), entry.id);
         return true;
+    }
+
+    launched(ctx) {
+        return !!ctx.env.HEROIC_APP_NAME;
     }
 
     identify(ctx, index) {
@@ -111,7 +119,7 @@ export class HeroicSource {
         if (ctx.heroic !== undefined)
             return ctx.heroic;
         const appName = ctx.env.HEROIC_APP_NAME;
-        const where = [...ctx.paths, ctx.cwd].filter(Boolean).map(pathKey);
+        const where = guessPaths(ctx, this);
         let game = null;
         if (appName || where.length) {
             const games = this._games();

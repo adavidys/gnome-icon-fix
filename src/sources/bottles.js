@@ -52,6 +52,8 @@ export function bottleFromConfig(config) {
 export class BottlesSource {
     constructor() {
         this.name = 'bottles';
+        this.sandbox = 'com.usebottles.bottles';
+        this.envKeys = ['BOTTLE'];
         this._configs = new StampCache(path => bottleFromConfig(parseYaml(readText(path))));
     }
 
@@ -71,6 +73,11 @@ export class BottlesSource {
             index.add(index.exec, stem, entry.id);
         }
         return true;
+    }
+
+    // A bottle is a prefix only Bottles makes.
+    launched(ctx) {
+        return !!ctx.env.BOTTLE || !!this._bottle(ctx);
     }
 
     identify(ctx, index) {

@@ -173,3 +173,29 @@ export function findHicolorIcon(share, name) {
     }
     return null;
 }
+
+// Game launchers from Flathub. Their games run inside their sandbox, and
+// the icons they make for game shortcuts stay in it.
+export const LAUNCHER_SANDBOXES = new Set([
+    'com.valvesoftware.Steam',
+    'com.heroicgameslauncher.hgl',
+    'net.lutris.Lutris',
+    'com.usebottles.bottles',
+]);
+
+// An icon a launcher's shortcut names but only that launcher's sandbox
+// has (Flatpak Lutris: lutris_<slug>, Flatpak Steam: steam_icon_<id>), as
+// an absolute path, or null.
+export function findSandboxedIcon(name) {
+    for (const id of LAUNCHER_SANDBOXES) {
+        for (const share of [home('.var', 'app', id, 'data'), home('.var', 'app', id, '.local', 'share')]) {
+            // Most of these launchers aren't installed: one check, not 16.
+            if (!exists(`${share}/icons/hicolor`))
+                continue;
+            const path = findHicolorIcon(share, name);
+            if (path)
+                return path;
+        }
+    }
+    return null;
+}

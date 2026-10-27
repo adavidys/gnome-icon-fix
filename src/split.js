@@ -13,6 +13,8 @@ import Shell from 'gi://Shell';
 
 import {InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 
+import {LAUNCHER_SANDBOXES} from './lib/util.js';
+
 // Gio.DesktopAppInfo moved to GioUnix in newer GLib.
 let DesktopAppInfo;
 try {
@@ -113,13 +115,6 @@ const VirtualAppInfo = GObject.registerClass({
     }
 });
 
-export const LAUNCHER_SANDBOXES = new Set([
-    'com.valvesoftware.Steam',
-    'com.heroicgameslauncher.hgl',
-    'net.lutris.Lutris',
-    'com.usebottles.bottles',
-]);
-
 // Per-app overrides, installed on the app objects themselves.
 const APP_METHODS = [
     'get_windows', 'get_n_windows', 'get_state', 'get_pids', 'is_on_workspace',
@@ -135,7 +130,7 @@ export class WindowSplitter {
         this._tracker = Shell.WindowTracker.get_default();
         // window -> {app, host}
         this._moved = new Map();
-        // "name\nicon" -> in-memory app, see virtualApp()
+        // name and icon -> in-memory app, see virtualApp()
         this._virtual = new Map();
         // Apps we put overrides on -> their own windows (null for hosts:
         // they keep theirs minus the moved ones)
@@ -188,20 +183,16 @@ export class WindowSplitter {
     }
 
     // An app for a game that has no .desktop file, built in memory from its
-    // name and icon (a path or icon name). It never shows up in the app
-    // grid; it exists while its windows do. Returns null if GNOME won't
-    // let us build one.
-    virtualApp(name, icon) {
-        const key = `${name}\n${icon}`;
+    // name and icon. It never shows up in the app grid; it exists while its
+    // windows do. key identifies the name and icon. Returns null if GNOME
+    // won't let us build one.
+    virtualApp(name, gicon, key) {
         if (this._virtual.has(key))
             return this._virtual.get(key);
 
         let app = null;
         try {
             const id = `icon-fix-virtual-${GLib.compute_checksum_for_string(GLib.ChecksumType.SHA1, key, -1).slice(0, 12)}.desktop`;
-            const gicon = icon.startsWith('/')
-                ? new Gio.FileIcon({file: Gio.File.new_for_path(icon)})
-                : new Gio.ThemedIcon({name: icon});
             app = new Shell.App({app_info: new VirtualAppInfo(id, name, gicon)});
         } catch (e) {
             console.error(`Icon Fix: can't create an app for ${name}: ${e}`);

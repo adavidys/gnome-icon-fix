@@ -14,6 +14,14 @@
 //   identify(ctx, index) -> {id} | null
 //       The desktop entry of a window (ctx: see windowContext() in
 //       lib/matcher.js), from exact signals only.
+//   sandbox: string
+//       The launcher's Flatpak app id: windows from that sandbox were
+//       started by it.
+//   launched(ctx) -> boolean
+//       Whether this launcher started the window's process, from other
+//       exact signals (its environment variables, a Wine prefix it made).
+//       The matcher keeps one launcher's guesses from claiming a game
+//       another one started (ctx.launcher; guessPaths() in lib/matcher.js).
 //   fallback(ctx, index) -> {iconName?, icon?, name?} | null
 //       What to show when no entry matched at all: a themed icon name, an
 //       icon file, a display name. Missing icons are skipped by the caller.
@@ -22,6 +30,7 @@
 // from disk until the file changes (StampCache in lib/util.js).
 
 import {BottlesSource} from './bottles.js';
+import {ExeSource} from './exe.js';
 import {HeroicSource} from './heroic.js';
 import {LutrisSource} from './lutris.js';
 import {PackagingSource} from './packaging.js';
@@ -37,6 +46,8 @@ export function createSources() {
         new LutrisSource(),
         new WineSource(),
         new PackagingSource(),
+        // Fallback only: whatever the launchers know comes first.
+        new ExeSource(),
     ];
 }
 

@@ -8,12 +8,15 @@
 
 import {tryCall} from './appindex.js';
 import {GENERIC_BINARIES, isWineProcess, programFromArgv, winePrefixOf, wineToHost} from './process.js';
-import {basename, canonical, exeStem, normalize} from './util.js';
+import {basename, canonical, exeStem, normalize, pathKey} from './util.js';
 
 const NO_PROCESS = {pid: 0, argv: [], exe: null, cwd: null, env: {}};
 
 // What the sources get to see about a window, worked out once:
 //   wmClass, wmInstance, gtkId, sandboxId: from the window
+//   launcherSandbox: the Flatpak sandbox it runs in, also when sandboxId
+//          is left out to match it as if it weren't sandboxed
+//   launcher: name of the source whose launcher started it, or null
 //   proc, env: from readProcess()
 //   wine: whether it's a Wine process; prefix: its Wine prefix
 //   stems: lowercased program names without extension ("game" for
@@ -52,6 +55,8 @@ export function windowContext(hints) {
         wmInstance: hints.wmInstance ?? null,
         gtkId: hints.gtkId ?? null,
         sandboxId: hints.sandboxId ?? null,
+        launcherSandbox: hints.launcherSandbox ?? hints.sandboxId ?? null,
+        launcher: null,
         proc,
         env: proc.env,
         wine,
@@ -62,6 +67,15 @@ export function windowContext(hints) {
     };
 }
 
+// Where the program runs from (pathKey'd), for a source to guess its game
+// by folder; nothing when another launcher started it, as one game folder
+// may be added to several launchers.
+export function guessPaths(ctx, source) {
+    if (ctx.launcher && ctx.launcher !== source.name)
+        return [];
+    return [...ctx.paths, ctx.cwd].filter(Boolean).map(pathKey);
+}
+
 function identify(index, sources, ctx) {
     for (const source of sources) {
         const found = tryCall(source, 'identify', ctx, index);
@@ -69,32 +83,38 @@ function identify(index, sources, ctx) {
             return found;
     }
 
+    // A guess must not hand a game one launcher started to another
+    // launcher's shortcut for the same game (same name, same folder).
+    const fits = id => id && (!ctx.launcher || (index.owner.get(id) ?? ctx.launcher) === ctx.launcher);
+
     for (const key of [ctx.sandboxId, ctx.gtkId, ctx.wmClass, ctx.wmInstance]) {
         const id = index.lookup(key);
-        if (id)
+        if (fits(id))
             return {id};
     }
 
     const exact = index.exactPath(ctx.paths);
-    if (exact)
+    if (fits(exact))
         return {id: exact};
 
     for (const stem of ctx.stems) {
         const id = index.lookup(stem);
-        if (id)
+        if (fits(id))
             return {id};
     }
 
     const near = index.nearestDir(ctx.cwd ? [...ctx.paths, ctx.cwd] : ctx.paths);
-    return near ? {id: near} : null;
+    return fits(near) ? {id: near} : null;
 }
 
-// hints: {wmClass, wmInstance, gtkId, sandboxId, proc}
+// hints: {wmClass, wmInstance, gtkId, sandboxId, launcherSandbox, proc}
 // Returns {primary, fallbacks}: primary is {id} of a desktop entry or null;
 // fallbacks (only looked for without a primary) are what the sources would
 // show instead, best first: [{iconName?, icon?, name?}].
 export function matchWindow(index, sources, hints) {
     const ctx = windowContext(hints);
+    ctx.launcher = sources.find(s =>
+        (s.sandbox && s.sandbox === ctx.launcherSandbox) || tryCall(s, 'launched', ctx))?.name ?? null;
     const primary = identify(index, sources, ctx);
     if (primary)
         return {primary, fallbacks: []};

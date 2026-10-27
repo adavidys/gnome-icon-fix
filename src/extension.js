@@ -15,6 +15,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {AppIndex} from './lib/appindex.js';
 import {matchTitle, matchWindow} from './lib/matcher.js';
 import {readProcess} from './lib/process.js';
+import {findSandboxedIcon} from './lib/util.js';
 import {FlatpakSteamMirror} from './mirror/steam-flatpak.js';
 import {createSources, envKeys} from './sources/registry.js';
 import {WindowSplitter} from './split.js';
@@ -165,10 +166,13 @@ export default class IconFixExtension extends Extension {
     }
 
     // Returns {app: Shell.App} or {gicon: Gio.Icon | null, name} for a
-    // window-backed app we could identify, null otherwise.
+    // window-backed app we could identify, {gicon} for an entry whose icon
+    // we found elsewhere, null otherwise.
     _resolve(app) {
-        if (!this._index || !app.is_window_backed())
+        if (!this._index)
             return null;
+        if (!app.is_window_backed())
+            return this._sandboxedIcon(app);
 
         const cached = this._cache.get(app);
         const win = app.get_windows()[0];
@@ -193,12 +197,10 @@ export default class IconFixExtension extends Extension {
                 sandboxId: win.get_sandboxed_app_id(),
                 proc: this._procInfo(pid),
             });
-            const shown = fallbacks.map(f => this._realize(f)).filter(Boolean);
             found = {
                 key,
                 primary: this._realize(primary),
-                // An icon beats a name alone.
-                fallback: shown.find(f => f.gicon) ?? shown[0] ?? null,
+                fallback: this._fallback(fallbacks),
             };
         }
 
@@ -206,6 +208,28 @@ export default class IconFixExtension extends Extension {
         this._cache.set(app, {key, primary: found.primary, fallback: found.fallback, title, result});
         if (cached && cached.result?.tag !== result?.tag)
             this._queueNotify(app);
+        return result;
+    }
+
+    // Launchers from Flathub write game shortcuts to the host but keep the
+    // icons they name inside their sandbox (Lutris' "Create application
+    // menu shortcut", Steam's desktop shortcuts), where the icon theme can't
+    // see them: show the icon file from there instead of a blank one.
+    _sandboxedIcon(app) {
+        const cached = this._cache.get(app);
+        if (cached)
+            return cached.result;
+        let result = null;
+        const icon = app.get_app_info()?.get_icon();
+        if (icon instanceof Gio.ThemedIcon) {
+            const names = icon.get_names();
+            if (!names.some(name => this._iconTheme.has_icon(name))) {
+                const path = names.map(name => findSandboxedIcon(name)).find(Boolean);
+                if (path)
+                    result = {gicon: new Gio.FileIcon({file: Gio.File.new_for_path(path)})};
+            }
+        }
+        this._cache.set(app, {result});
         return result;
     }
 
@@ -232,6 +256,18 @@ export default class IconFixExtension extends Extension {
         return {gicon, name: found.name ?? null, tag: `${tag}\n${found.name}`};
     }
 
+    // What the sources would show without an entry, combined: the best
+    // source's name and the best source's icon need not be the same one
+    // (a launcher knows the title, the .exe has the icon).
+    _fallback(fallbacks) {
+        const shown = fallbacks.map(f => this._realize(f)).filter(Boolean);
+        if (!shown.length)
+            return null;
+        const gicon = shown.find(f => f.gicon)?.gicon ?? null;
+        const name = shown.find(f => f.name)?.name ?? null;
+        return {gicon, name, tag: `${gicon?.to_string()}\n${name}`};
+    }
+
     // For a window inside a launcher's Flatpak sandbox: the app of the game
     // running in it. Matched as if it weren't sandboxed, so the launcher's
     // own windows (no game id in their environment) stay with the launcher.
@@ -242,21 +278,17 @@ export default class IconFixExtension extends Extension {
             wmClass: win.get_wm_class(),
             wmInstance: win.get_wm_class_instance(),
             gtkId: win.get_gtk_application_id(),
+            launcherSandbox: win.get_sandboxed_app_id(),
             proc: this._procInfo(win.get_pid()),
         });
         if (primary)
             return this._appSystem.lookup_app(primary.id);
 
-        // No .desktop for it (Flatpak Bottles can't create one): still give
-        // the game its own entry if a source knows its name and icon.
-        for (const found of fallbacks) {
-            const icon = found.icon && GLib.file_test(found.icon, GLib.FileTest.EXISTS)
-                ? found.icon
-                : found.iconName && this._iconTheme.has_icon(found.iconName) && found.iconName;
-            if (found.name && icon)
-                return splitter.virtualApp(found.name, icon);
-        }
-        return null;
+        // No .desktop for it (Flatpak Bottles can't create one, Heroic
+        // doesn't for sideloaded games): still give the game its own entry
+        // if the sources know its name and icon.
+        const shown = this._fallback(fallbacks);
+        return shown?.gicon && shown.name ? splitter.virtualApp(shown.name, shown.gicon, shown.tag) : null;
     }
 
     _procInfo(pid) {
@@ -291,7 +323,7 @@ export default class IconFixExtension extends Extension {
 
     _refreshRunning() {
         this._refreshIcons(new Set(
-            this._appSystem.get_running().filter(app => app.is_window_backed())));
+            this._appSystem.get_running().filter(app => app.is_window_backed() || this._resolve(app))));
     }
 
     // notify::icon alone is not enough: dash-to-dock only listens to it for

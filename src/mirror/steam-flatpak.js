@@ -1,14 +1,17 @@
-// Steam from Flathub writes its game shortcuts inside its own sandbox home,
-// where GNOME never looks, and their Exec calls a `steam` binary the host
+// Steam from Flathub writes its game shortcuts inside its own sandbox home
+// (its applications dir, and its Desktop for "Add desktop shortcut"), where
+// GNOME never looks, and their Exec calls a `steam` binary the host
 // doesn't have. When enabled, we mirror each shortcut into the user's
 // applications dir as steam-flatpak-<id>.desktop with a working Exec and an
-// absolute Icon path. Only files we generated (prefix + marker key) are ever
-// written or removed.
+// absolute Icon path. Non-Steam games get their name and icon from Steam's
+// shortcuts.vdf (or the .exe). Only files we generated (prefix + marker key)
+// are ever written or removed.
 
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
 import {exists, findHicolorIcon, listDir, readText} from '../lib/util.js';
+import {readShortcuts, shortcutFiles, shortcutLook} from '../sources/steam.js';
 
 const STEAM_APP = 'com.valvesoftware.Steam';
 const PREFIX = 'steam-flatpak-';
@@ -23,6 +26,11 @@ function steamShare() {
     return GLib.build_filenamev([GLib.get_home_dir(), '.var', 'app', STEAM_APP, '.local', 'share']);
 }
 
+// Icons taken from non-Steam games' .exe files, for our shortcuts to use.
+function iconDir() {
+    return GLib.build_filenamev([GLib.get_user_data_dir(), 'icon-fix', 'icons']);
+}
+
 // Icon= in a Flatpak Steam shortcut names an icon in the sandbox's own
 // hicolor theme; turn it into a path the host can read.
 function resolveIcon(share, icon) {
@@ -32,8 +40,9 @@ function resolveIcon(share, icon) {
 }
 
 // Returns the host .desktop contents for one Flatpak shortcut, or null if it
-// isn't a Steam game shortcut.
-export function convertShortcut(share, data) {
+// isn't a Steam game shortcut. nonSteam(id) gives {name, icon} for a
+// non-Steam game's 32-bit id.
+export function convertShortcut(share, data, nonSteam = () => null) {
     const kf = new GLib.KeyFile();
     try {
         kf.load_from_bytes(new GLib.Bytes(encoder.encode(data)),
@@ -66,9 +75,14 @@ export function convertShortcut(share, data) {
     try {
         icon = kf.get_string(GROUP, 'Icon');
     } catch {}
-    const iconPath = resolveIcon(share, icon);
+    let iconPath = resolveIcon(share, icon);
+    // Steam leaves Icon= empty and names them "Game.exe".
+    const extra = BigInt(gameId) > 0xffffffffn ? nonSteam(String(BigInt(gameId) >> 32n)) : null;
+    iconPath ??= extra?.icon ?? null;
     if (iconPath)
         kf.set_string(GROUP, 'Icon', iconPath);
+    if (extra?.name)
+        kf.set_string(GROUP, 'Name', extra.name);
 
     kf.set_boolean(GROUP, MARKER, true);
     return {gameId, data: kf.to_data()[0]};
@@ -77,18 +91,24 @@ export function convertShortcut(share, data) {
 export class FlatpakSteamMirror {
     constructor() {
         this._share = steamShare();
-        this._source = GLib.build_filenamev([this._share, 'applications']);
+        this._sources = [
+            GLib.build_filenamev([this._share, 'applications']),
+            GLib.build_filenamev([GLib.get_home_dir(), '.var', 'app', STEAM_APP, 'Desktop']),
+        ];
         this._target = GLib.build_filenamev([GLib.get_user_data_dir(), 'applications']);
         this._syncId = 0;
-        this._waitId = 0;
-        this._monitor = null;
+        // dir -> wait timer id or file monitor
+        this._waits = new Map();
+        this._monitors = new Map();
 
-        this._watch();
+        for (const dir of this._sources)
+            this._watch(dir);
         this.sync();
     }
 
     destroy() {
-        this._unwatch();
+        for (const dir of this._sources)
+            this._unwatch(dir);
         if (this._syncId) {
             GLib.source_remove(this._syncId);
             this._syncId = 0;
@@ -97,38 +117,38 @@ export class FlatpakSteamMirror {
 
     // A monitor on a missing dir never fires, so until Steam has created it
     // just check for it now and then.
-    _watch() {
-        const dir = Gio.File.new_for_path(this._source);
+    _watch(path) {
+        const dir = Gio.File.new_for_path(path);
         if (!dir.query_exists(null)) {
-            this._waitId = GLib.timeout_add_seconds(GLib.PRIORITY_LOW, WAIT_SECONDS, () => {
+            this._waits.set(path, GLib.timeout_add_seconds(GLib.PRIORITY_LOW, WAIT_SECONDS, () => {
                 if (!dir.query_exists(null))
                     return GLib.SOURCE_CONTINUE;
-                this._waitId = 0;
-                this._watch();
+                this._waits.delete(path);
+                this._watch(path);
                 this._queueSync();
                 return GLib.SOURCE_REMOVE;
-            });
+            }));
             return;
         }
 
-        this._monitor = dir.monitor_directory(Gio.FileMonitorFlags.NONE, null);
-        this._monitor.connect('changed', (_monitor, file, _other, event) => {
+        const monitor = dir.monitor_directory(Gio.FileMonitorFlags.NONE, null);
+        monitor.connect('changed', (_monitor, file, _other, event) => {
             this._queueSync();
             // Steam was uninstalled: wait for it to come back.
             if (event === Gio.FileMonitorEvent.DELETED && file.equal(dir)) {
-                this._unwatch();
-                this._watch();
+                this._unwatch(path);
+                this._watch(path);
             }
         });
+        this._monitors.set(path, monitor);
     }
 
-    _unwatch() {
-        this._monitor?.cancel();
-        this._monitor = null;
-        if (this._waitId) {
-            GLib.source_remove(this._waitId);
-            this._waitId = 0;
-        }
+    _unwatch(path) {
+        this._monitors.get(path)?.cancel();
+        this._monitors.delete(path);
+        if (this._waits.has(path))
+            GLib.source_remove(this._waits.get(path));
+        this._waits.delete(path);
     }
 
     // Steam rewrites shortcuts in bursts while installing; settle first.
@@ -143,14 +163,22 @@ export class FlatpakSteamMirror {
     }
 
     sync() {
+        let shortcuts = null;
+        const nonSteam = id => {
+            shortcuts ??= shortcutFiles(GLib.build_filenamev([this._share, 'Steam'])).flatMap(readShortcuts);
+            const shortcut = shortcuts.find(s => s.id === id);
+            return shortcut ? shortcutLook(shortcut, iconDir()) : null;
+        };
         const wanted = new Map();
-        for (const name of listDir(this._source)) {
-            if (!name.endsWith('.desktop'))
-                continue;
-            const data = readText(GLib.build_filenamev([this._source, name]));
-            const out = data && convertShortcut(this._share, data);
-            if (out)
-                wanted.set(`${PREFIX}${out.gameId}.desktop`, out.data);
+        for (const dir of this._sources) {
+            for (const name of listDir(dir)) {
+                if (!name.endsWith('.desktop'))
+                    continue;
+                const data = readText(GLib.build_filenamev([dir, name]));
+                const out = data && convertShortcut(this._share, data, nonSteam);
+                if (out && !wanted.has(`${PREFIX}${out.gameId}.desktop`))
+                    wanted.set(`${PREFIX}${out.gameId}.desktop`, out.data);
+            }
         }
 
         GLib.mkdir_with_parents(this._target, 0o755);

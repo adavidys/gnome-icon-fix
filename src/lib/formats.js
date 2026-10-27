@@ -115,3 +115,52 @@ export function parseVdf(text) {
     }
     return root;
 }
+
+// Valve's binary KeyValues (shortcuts.vdf, Steam's non-Steam games):
+// typed fields, maps closed by 0x08. Keys are lowercased like parseVdf().
+export function parseBinaryVdf(bytes) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const decoder = new TextDecoder();
+    let pos = 0;
+    const cstring = () => {
+        const end = bytes.indexOf(0, pos);
+        if (end < 0)
+            throw new Error('truncated string');
+        const str = decoder.decode(bytes.subarray(pos, end));
+        pos = end + 1;
+        return str;
+    };
+    const map = () => {
+        const node = {};
+        while (pos < bytes.length) {
+            const type = bytes[pos++];
+            if (type === 0x08)
+                return node;
+            const key = cstring().toLowerCase();
+            switch (type) {
+            case 0x00:
+                node[key] = map();
+                break;
+            case 0x01:
+                node[key] = cstring();
+                break;
+            case 0x02:
+                node[key] = view.getInt32(pos, true);
+                pos += 4;
+                break;
+            case 0x03:
+                node[key] = view.getFloat32(pos, true);
+                pos += 4;
+                break;
+            case 0x07:
+                node[key] = view.getBigUint64(pos, true);
+                pos += 8;
+                break;
+            default:
+                throw new Error(`unknown field type ${type}`);
+            }
+        }
+        return node;
+    };
+    return map();
+}

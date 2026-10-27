@@ -32,6 +32,8 @@ export class AppIndex {
         this.path = new Map();
         // Install folder (the program's folder, or Path=) -> id
         this.dir = new Map();
+        // id -> name of the source whose launcher the entry runs
+        this.owner = new Map();
         // Tables the sources keep for themselves, see map()
         this._maps = new Map();
 
@@ -66,8 +68,12 @@ export class AppIndex {
             // Every source sees every entry (Steam also indexes Icon=), any
             // of them can claim it as its launcher.
             let claimed = false;
-            for (const source of sources)
-                claimed = tryCall(source, 'indexEntry', e, argv, this) || claimed;
+            for (const source of sources) {
+                if (tryCall(source, 'indexEntry', e, argv, this) && !claimed) {
+                    claimed = true;
+                    this.owner.set(id, source.name);
+                }
+            }
 
             if (!claimed) {
                 const program = programFromArgv(argv);

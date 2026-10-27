@@ -3,16 +3,20 @@
 // Its shortcuts run lutris:rungameid/<id> and are named
 // net.lutris.<slug>-<id>.desktop with Icon=lutris_<slug>. Each game has a
 // <slug>-<timestamp>.yml config whose `game` section holds the exe and Wine
-// prefix, which is how a running game is recognized.
+// prefix, which is how a running game is recognized. Lutris exports the
+// game's name as GAME_NAME.
 
 import {parseYaml} from '../lib/formats.js';
+import {guessPaths} from '../lib/matcher.js';
 import {
     StampCache, basename, canonical, configDir, dataDir, exeStem, findHicolorIcon, home,
     isSpecificDir, isUnder, listDir, pathKey, readText,
 } from '../lib/util.js';
 
+const SANDBOX = 'net.lutris.Lutris';
+
 function flatpakDir(...parts) {
-    return home('.var', 'app', 'net.lutris.Lutris', ...parts);
+    return home('.var', 'app', SANDBOX, ...parts);
 }
 
 function gameDirs() {
@@ -43,6 +47,8 @@ export function gameFromConfig(path, config) {
 export class LutrisSource {
     constructor() {
         this.name = 'lutris';
+        this.sandbox = SANDBOX;
+        this.envKeys = ['GAME_NAME', 'LUTRIS_GAME_UUID'];
         // Configs are rewritten in place, so each one is checked on its own;
         // the folder only tells us which ones exist.
         this._lists = new StampCache(dir => listDir(dir).filter(name => /\.ya?ml$/.test(name)));
@@ -61,6 +67,13 @@ export class LutrisSource {
         return true;
     }
 
+    // Older versions don't set LUTRIS_GAME_UUID; a prefix Lutris made for
+    // a game is as sure a sign.
+    launched(ctx) {
+        return !!ctx.env.LUTRIS_GAME_UUID ||
+            (!!ctx.prefix && this._games().some(g => g.prefix === ctx.prefix));
+    }
+
     identify(ctx, index) {
         const game = this._game(ctx);
         const id = game && index.map('lutris').get(game.slug);
@@ -72,7 +85,7 @@ export class LutrisSource {
         if (!game)
             return null;
         const iconName = `lutris_${game.slug}`;
-        return {iconName, icon: findHicolorIcon(flatpakDir('data'), iconName)};
+        return {iconName, icon: findHicolorIcon(flatpakDir('data'), iconName), name: ctx.env.GAME_NAME || null};
     }
 
     _games() {
@@ -84,7 +97,7 @@ export class LutrisSource {
     _game(ctx) {
         if (ctx.lutris !== undefined)
             return ctx.lutris;
-        const where = [...ctx.paths, ctx.cwd].filter(Boolean).map(pathKey);
+        const where = guessPaths(ctx, this);
         let game = null;
         if (ctx.prefix || where.length) {
             const games = this._games();

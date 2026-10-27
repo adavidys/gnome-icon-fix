@@ -49,6 +49,8 @@ Turn on **Show Flatpak Steam games** in the extension's preferences (off by defa
 - uses the game's icon from the sandbox;
 - sets `StartupWMClass=steam_app_<id>`.
 
+Shortcuts made with **Manage → Add desktop shortcut** (Flatpak Steam keeps them in its sandbox's `Desktop` folder) are mirrored too. For non-Steam games, Steam leaves the icon empty and names them `Game.exe`: the mirror takes the name from Steam's list of non-Steam games without the `.exe`, and the icon you picked in Steam or else the one inside the `.exe` (saved to `~/.local/share/icon-fix/icons`).
+
 The mirror stays in sync as you install or remove games. Icon Fix only writes and deletes files it generated itself. Turning the option off removes them.
 
 ### Running games from Flatpak launchers
@@ -56,6 +58,16 @@ The mirror stays in sync as you install or remove games. Icon Fix only writes an
 GNOME assigns every window from a Flatpak sandbox to that sandbox's app, whatever `StartupWMClass` says. So a game started by Steam, Heroic, Lutris or Bottles from Flathub shows up as the launcher itself in the dock and Alt+Tab.
 
 Icon Fix moves such windows to the game's own entry, when it can find one, as Dash to Dock does for its file manager windows. The game then gets its own icon in the dock, Alt+Tab and the overview, and clicking it brings the running game up instead of launching it again. The launcher's own windows stay with the launcher.
+
+Some launchers don't make an entry at all: Flatpak Bottles can't, and Heroic doesn't for sideloaded games. The game then still gets an entry of its own, kept in memory only while it runs, with the name and icon the launcher knows or, for Windows games, the icon inside the `.exe`.
+
+Shortcuts that Flatpak Lutris creates (**Create application menu shortcut**) name an icon that only exists inside Lutris's sandbox. Icon Fix shows it from there instead of a blank icon.
+
+If you added the same game folder to several launchers, each window is matched to the launcher that actually started it.
+
+### Windows games without an icon
+
+When nothing else knows a Wine game's icon, Icon Fix reads the one stored in its `.exe` (and its product name, if it has one) and caches it as a PNG in `~/.cache/icon-fix`. The game files are only read, never changed.
 
 ## Install
 
@@ -82,12 +94,14 @@ Supports GNOME Shell 45 to 51.
 ```
 src/
 ├── extension.js        # patches app icons/names for unmatched windows, caches results
+├── split.js            # moves game windows out of Flatpak launchers' apps
 ├── prefs.js            # preferences window
 ├── lib/                # no Shell imports: runs and tests with plain gjs
 │   ├── appindex.js     # lookup tables over the installed .desktop entries
 │   ├── matcher.js      # matching order: sources, class, program, folder, title
 │   ├── process.js      # /proc reading, argv parsing, Wine path translation
 │   ├── formats.js      # YAML (Bottles, Lutris) and VDF (Steam) readers
+│   ├── peicon.js       # icon and product name from a Windows .exe
 │   └── util.js         # paths, file caches
 ├── sources/            # one file per launcher, see registry.js for the interface
 │   ├── registry.js
@@ -96,7 +110,8 @@ src/
 │   ├── lutris.js
 │   ├── bottles.js
 │   ├── wine.js
-│   └── packaging.js    # Snap, AppImage
+│   ├── packaging.js    # Snap, AppImage
+│   └── exe.js          # last resort: the .exe's own icon
 ├── mirror/
 │   └── steam-flatpak.js  # optional Flatpak Steam shortcut mirror
 ├── metadata.json
