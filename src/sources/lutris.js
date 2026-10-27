@@ -8,8 +8,9 @@
 
 import {parseYaml} from '../lib/formats.js';
 import {guessPaths} from '../lib/matcher.js';
+import {exeInfo} from '../lib/peicon.js';
 import {
-    StampCache, basename, canonical, configDir, dataDir, exeStem, findHicolorIcon, home,
+    StampCache, basename, canonical, configDir, dataDir, exeStem, exists, findHicolorIcon, home,
     isSpecificDir, isUnder, listDir, pathKey, readText,
 } from '../lib/util.js';
 
@@ -30,7 +31,19 @@ function gameDirs() {
 
 const RUN = /lutris:(?:rungameid\/\d+|rungame\/([\w.-]+))/;
 
-// <slug>-<timestamp>.yml -> {slug, stem, prefix, dir}
+// The game slug a Lutris entry runs: null if it doesn't say, undefined if
+// it isn't a Lutris entry.
+function slugOf(entry) {
+    const m = entry.exec?.match(RUN);
+    if (!m)
+        return undefined;
+    return m[1] ??
+        entry.id.match(/^net\.lutris\.(.+)-\d+\.desktop$/)?.[1] ??
+        entry.icon?.match(/^lutris_(.+)$/)?.[1] ??
+        null;
+}
+
+// <slug>-<timestamp>.yml -> {slug, stem, prefix, dir, exe}
 export function gameFromConfig(path, config) {
     const game = config.game ?? {};
     const exe = typeof game.exe === 'string' ? game.exe : null;
@@ -41,6 +54,7 @@ export function gameFromConfig(path, config) {
         stem: exe ? exeStem(exe) : null,
         prefix: canonical(game.prefix),
         dir: isSpecificDir(dir) ? pathKey(dir) : null,
+        exe: exePath,
     };
 }
 
@@ -56,12 +70,9 @@ export class LutrisSource {
     }
 
     indexEntry(entry, _argv, index) {
-        const m = entry.exec?.match(RUN);
-        if (!m)
+        const slug = slugOf(entry);
+        if (slug === undefined)
             return false;
-        const slug = m[1] ??
-            entry.id.match(/^net\.lutris\.(.+)-\d+\.desktop$/)?.[1] ??
-            entry.icon?.match(/^lutris_(.+)$/)?.[1];
         if (slug)
             index.add(index.map('lutris'), slug, entry.id);
         return true;
@@ -69,6 +80,16 @@ export class LutrisSource {
 
     // Older versions don't set LUTRIS_GAME_UUID; a prefix Lutris made for
     // a game is as sure a sign.
+    // Its lutris_<slug> icon, else the game's .exe.
+    entryIcon(entry) {
+        const slug = slugOf(entry);
+        if (!slug)
+            return null;
+        const icon = findHicolorIcon(dataDir(), `lutris_${slug}`) ?? findHicolorIcon(flatpakDir('data'), `lutris_${slug}`);
+        const exe = !icon && this._games().find(g => g.slug === slug)?.exe;
+        return icon ?? (exe && exists(exe) ? exeInfo(exe)?.icon ?? null : null);
+    }
+
     launched(ctx) {
         return !!ctx.env.LUTRIS_GAME_UUID ||
             (!!ctx.prefix && this._games().some(g => g.prefix === ctx.prefix));

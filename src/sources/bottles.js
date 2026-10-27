@@ -6,13 +6,21 @@
 // executable, and a running program's WINEPREFIX is the bottle's folder.
 
 import {parseYaml} from '../lib/formats.js';
-import {StampCache, basename, canonical, exeStem, readText} from '../lib/util.js';
+import {exeInfo} from '../lib/peicon.js';
+import {StampCache, basename, canonical, dataDir, exeStem, exists, home, listDir, readText} from '../lib/util.js';
 
 const FLAGS = {
     '-p': 'program', '--program': 'program',
     '-b': 'bottle', '--bottle': 'bottle',
     '-e': 'executable', '--executable': 'executable',
 };
+
+function bottleDirs() {
+    return [
+        dataDir('bottles', 'bottles'),
+        home('.var', 'app', 'com.usebottles.bottles', 'data', 'bottles', 'bottles'),
+    ];
+}
 
 const LAUNCHERS = new Set([
     'bottles-cli', 'bottles', '--command=bottles-cli', '--command=bottles', 'com.usebottles.bottles',
@@ -38,13 +46,13 @@ export function parseBottlesExec(argv) {
     return out.bottle && (out.program || out.executable) ? out : null;
 }
 
-// bottle.yml -> {name, programs: [{name, stem}]}
+// bottle.yml -> {name, programs: [{name, stem, path}]}
 export function bottleFromConfig(config) {
     const programs = [];
     for (const program of Object.values(config.External_Programs ?? {})) {
         const exe = program?.executable || program?.path;
         if (program?.name && typeof exe === 'string')
-            programs.push({name: program.name, stem: exeStem(exe)});
+            programs.push({name: program.name, stem: exeStem(exe), path: canonical(program.path)});
     }
     return {name: config.Name ?? null, programs};
 }
@@ -95,6 +103,31 @@ export class BottlesSource {
                         return {id};
                 }
             }
+        }
+        return null;
+    }
+
+    // The icon Bottles extracted from the program's .exe, else the .exe.
+    entryIcon(_entry, argv) {
+        const launch = parseBottlesExec(argv);
+        if (!launch?.program)
+            return null;
+        // -b: the bottle's path, or its folder name (native) or Name
+        // (Flatpak) under one of the bottles dirs.
+        const ref = launch.bottle;
+        const candidates = canonical(ref) ? [canonical(ref)]
+            : bottleDirs().flatMap(root => listDir(root).map(name => `${root}/${name}`));
+        for (const dir of candidates) {
+            const config = this._configs.get(`${dir}/bottle.yml`);
+            if (!config || (dir !== canonical(ref) && basename(dir) !== ref && config.name !== ref))
+                continue;
+            const program = config.programs.find(p => p.name === launch.program);
+            if (!program)
+                continue;
+            const icon = `${dir}/icons/${program.name}.png`;
+            if (exists(icon))
+                return icon;
+            return program.path && exists(program.path) ? exeInfo(program.path)?.icon ?? null : null;
         }
         return null;
     }

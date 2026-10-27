@@ -132,6 +132,21 @@ export class SteamSource {
         return true;
     }
 
+    // Non-Steam games: the icon picked in Steam or the .exe's own. Steam
+    // games: their steam_icon_<id>, wherever Steam put it.
+    entryIcon(entry) {
+        const gameId = entry.exec?.match(/steam:\/\/(?:rungameid|run)\/(\d+)/)?.[1];
+        if (!gameId)
+            return null;
+        if (BigInt(gameId) > 0xffffffffn) {
+            const id = String(BigInt(gameId) >> 32n);
+            const shortcut = this._nonSteamGames().find(s => s.id === id);
+            return shortcut ? shortcutLook(shortcut).icon : null;
+        }
+        const name = `steam_icon_${gameId}`;
+        return findHicolorIcon(dataDir(), name) ?? findHicolorIcon(flatpakShare(), name);
+    }
+
     // umu (Heroic, Lutris) sets SteamAppId too, along with GAMEID.
     launched(ctx) {
         return /^[1-9]\d*$/.test(ctx.env.SteamAppId ?? '') && !ctx.env.GAMEID;

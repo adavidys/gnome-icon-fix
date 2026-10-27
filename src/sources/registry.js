@@ -22,6 +22,10 @@
 //       exact signals (its environment variables, a Wine prefix it made).
 //       The matcher keeps one launcher's guesses from claiming a game
 //       another one started (ctx.launcher; guessPaths() in lib/matcher.js).
+//   entryIcon(entry, argv) -> string | null
+//       An icon file for a desktop entry of this source's whose own icon
+//       can't be shown (none given, or missing), typically taken from the
+//       game it launches. May read the disk; only asked when needed.
 //   fallback(ctx, index) -> {iconName?, icon?, name?} | null
 //       What to show when no entry matched at all: a themed icon name, an
 //       icon file, a display name. Missing icons are skipped by the caller.

@@ -12,7 +12,7 @@ import St from 'gi://St';
 import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {AppIndex} from './lib/appindex.js';
+import {AppIndex, parseExec, tryCall} from './lib/appindex.js';
 import {matchTitle, matchWindow} from './lib/matcher.js';
 import {readProcess} from './lib/process.js';
 import {findSandboxedIcon} from './lib/util.js';
@@ -172,7 +172,7 @@ export default class IconFixExtension extends Extension {
         if (!this._index)
             return null;
         if (!app.is_window_backed())
-            return this._sandboxedIcon(app);
+            return this._entryIcon(app);
 
         const cached = this._cache.get(app);
         const win = app.get_windows()[0];
@@ -211,26 +211,49 @@ export default class IconFixExtension extends Extension {
         return result;
     }
 
-    // Launchers from Flathub write game shortcuts to the host but keep the
-    // icons they name inside their sandbox (Lutris' "Create application
-    // menu shortcut", Steam's desktop shortcuts), where the icon theme can't
-    // see them: show the icon file from there instead of a blank one.
-    _sandboxedIcon(app) {
+    // A desktop entry whose icon can't be shown gets a real one instead of a
+    // blank one: an icon its launcher kept inside its Flatpak sandbox
+    // (Lutris' "Create application menu shortcut", Steam's shortcuts), else
+    // the icon of the game it launches (its .exe's) when there's none at all.
+    _entryIcon(app) {
         const cached = this._cache.get(app);
         if (cached)
             return cached.result;
-        let result = null;
-        const icon = app.get_app_info()?.get_icon();
-        if (icon instanceof Gio.ThemedIcon) {
-            const names = icon.get_names();
-            if (!names.some(name => this._iconTheme.has_icon(name))) {
-                const path = names.map(name => findSandboxedIcon(name)).find(Boolean);
-                if (path)
-                    result = {gicon: new Gio.FileIcon({file: Gio.File.new_for_path(path)})};
-            }
+        let path = null;
+        const info = app.get_app_info();
+        const icon = info?.get_icon();
+        if (info && !this._iconShown(icon)) {
+            if (icon instanceof Gio.ThemedIcon)
+                path = icon.get_names().map(name => findSandboxedIcon(name)).find(Boolean) ?? null;
+            path ??= this._programIcon(info);
         }
+        const result = path ? {gicon: new Gio.FileIcon({file: Gio.File.new_for_path(path)})} : null;
         this._cache.set(app, {result});
         return result;
+    }
+
+    _iconShown(icon) {
+        if (icon instanceof Gio.ThemedIcon)
+            return icon.get_names().some(name => this._iconTheme.has_icon(name));
+        if (icon instanceof Gio.FileIcon)
+            return icon.get_file().query_exists(null);
+        return !!icon;
+    }
+
+    // Asks the sources for the icon of what an entry launches.
+    _programIcon(info) {
+        // Gio.DesktopAppInfo moved to GioUnix in newer GLib; duck-type it.
+        const exec = typeof info.get_string === 'function' ? info.get_string('Exec') : null;
+        if (!exec)
+            return null;
+        const entry = {id: info.get_id() ?? '', exec, icon: info.get_string('Icon')};
+        const argv = parseExec(exec);
+        for (const source of this._sources) {
+            const path = tryCall(source, 'entryIcon', entry, argv);
+            if (path && GLib.file_test(path, GLib.FileTest.EXISTS))
+                return path;
+        }
+        return null;
     }
 
     // Turns a match into what the patched methods return, or null when it

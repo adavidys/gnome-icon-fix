@@ -4,12 +4,23 @@
 // `wine game.exe`.
 
 import {exeInfo} from '../lib/peicon.js';
-import {programFromArgv} from '../lib/process.js';
-import {basename, canonical, exists, stripExt} from '../lib/util.js';
+import {programFromArgv, wineToHost} from '../lib/process.js';
+import {basename, canonical, exists, home, stripExt} from '../lib/util.js';
 
 export class ExeSource {
     constructor() {
         this.name = 'exe';
+    }
+
+    // `[env WINEPREFIX=...] wine C:\\Games\\game.exe`, `wine /path/game.exe`
+    entryIcon(_entry, argv) {
+        const program = programFromArgv(argv)?.path;
+        if (!program || !/\.exe$/i.test(program))
+            return null;
+        const prefix = canonical(argv.map(arg => arg.match(/^WINEPREFIX=(.+)$/)?.[1]).find(Boolean)) ??
+            home('.wine');
+        const path = wineToHost(program, prefix);
+        return path && exists(path) ? exeInfo(path)?.icon ?? null : null;
     }
 
     fallback(ctx) {

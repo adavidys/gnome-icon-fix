@@ -6,6 +6,7 @@
 // versions) or by its install folder from the stores' installed.json.
 
 import {guessPaths} from '../lib/matcher.js';
+import {exeInfo} from '../lib/peicon.js';
 import {StampCache, canonical, configDir, exists, home, isSpecificDir, isUnder, pathKey, readJson} from '../lib/util.js';
 
 const SANDBOX = 'com.heroicgameslauncher.hgl';
@@ -28,6 +29,20 @@ const INSTALLED = [
 // heroic://launch/<runner>/<appName>, heroic://launch/<appName> (older),
 // heroic://launch?appName=<appName>&runner=<runner> (newer)
 const LAUNCH = /heroic:\/\/launch(?:\/(?:(?:legendary|gog|nile|sideload)\/)?([^\s?&"'/]+)|\?[^\s"']*?\bappName=([^\s&"']+))/;
+
+// Where Heroic saves the icons it uses for its shortcuts.
+function iconOf(appName) {
+    if (!appName)
+        return null;
+    for (const root of roots()) {
+        for (const ext of ['png', 'jpg', 'jpeg', 'webp']) {
+            const path = `${root}/icons/${appName}.${ext}`;
+            if (exists(path))
+                return path;
+        }
+    }
+    return null;
+}
 
 function decode(str) {
     try {
@@ -59,8 +74,11 @@ export function installedGames(json) {
         const exe = game?.install?.executable;
         const dir = canonical(game?.install_path ?? game?.path ??
             (typeof exe === 'string' ? exe.slice(0, exe.lastIndexOf('/')) : null));
+        // Sideloaded: install.executable; Legendary: executable, relative.
+        const program = canonical(typeof exe === 'string' ? exe
+            : typeof game?.executable === 'string' && dir ? `${dir}/${game.executable}` : null);
         if (appName && dir && isSpecificDir(dir))
-            games.push({appName: String(appName), title: game.title ?? null, dir: pathKey(dir)});
+            games.push({appName: String(appName), title: game.title ?? null, dir: pathKey(dir), exe: program});
     }
     return games;
 }
@@ -95,20 +113,16 @@ export class HeroicSource {
         return game && shortcuts.has(game.appName) ? {id: shortcuts.get(game.appName)} : null;
     }
 
+    entryIcon(entry) {
+        const m = entry.exec?.match(LAUNCH);
+        const appName = m && decode(m[1] ?? m[2]);
+        const game = appName && this._games().find(g => g.appName === appName);
+        return iconOf(appName) ?? (game?.exe && exists(game.exe) ? exeInfo(game.exe)?.icon ?? null : null);
+    }
+
     fallback(ctx) {
         const game = this._game(ctx);
-        if (!game)
-            return null;
-        // Where Heroic saves the icons it uses for its shortcuts.
-        let icon = null;
-        for (const root of roots()) {
-            for (const ext of ['png', 'jpg', 'jpeg', 'webp']) {
-                const path = `${root}/icons/${game.appName}.${ext}`;
-                if (!icon && exists(path))
-                    icon = path;
-            }
-        }
-        return {icon, name: game.title};
+        return game ? {icon: iconOf(game.appName), name: game.title} : null;
     }
 
     _games() {

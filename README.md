@@ -69,6 +69,8 @@ If you added the same game folder to several launchers, each window is matched t
 
 When nothing else knows a Wine game's icon, Icon Fix reads the one stored in its `.exe` (and its product name, if it has one) and caches it as a PNG in `~/.cache/icon-fix`. The game files are only read, never changed.
 
+The same goes for shortcuts with an empty `Icon=` or one that points nowhere: Icon Fix finds the game the shortcut launches (a `.exe` in `Exec`, or the game behind a Steam, Heroic, Lutris or Bottles shortcut) and shows its icon in the app grid, search and dock. Native Linux programs keep no icon inside them, so this only works for Windows games.
+
 ## Install
 
 **From GNOME Extensions (recommended):** [extensions.gnome.org/extension/11492/icon-fix](https://extensions.gnome.org/extension/11492/icon-fix/)

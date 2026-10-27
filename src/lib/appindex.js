@@ -19,6 +19,17 @@ export function tryCall(source, method, ...args) {
     }
 }
 
+// Exec= -> argv, field codes (%u, %f...) dropped; [] if it can't be parsed.
+export function parseExec(exec) {
+    if (!exec)
+        return [];
+    try {
+        return GLib.shell_parse_argv(exec.replace(/%[a-zA-Z]/g, ''))[1];
+    } catch {
+        return [];
+    }
+}
+
 export class AppIndex {
     // entries: [{id, name, wmClass, exec, icon, path}] (strings, may be null)
     // sources: see sources/registry.js
@@ -58,12 +69,7 @@ export class AppIndex {
             if (e.icon && !e.icon.startsWith('/'))
                 this.add(this.icon, e.icon.toLowerCase(), id);
 
-            let argv = [];
-            if (e.exec) {
-                try {
-                    argv = GLib.shell_parse_argv(e.exec.replace(/%[a-zA-Z]/g, ''))[1];
-                } catch {}
-            }
+            const argv = parseExec(e.exec);
 
             // Every source sees every entry (Steam also indexes Icon=), any
             // of them can claim it as its launcher.
