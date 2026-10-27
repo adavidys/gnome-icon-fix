@@ -19,14 +19,43 @@ StartupWMClass=steam_app_1422450
 
 ## How it works
 
-When GNOME can't place a window, Icon Fix finds the matching `.desktop` file the way KDE does:
+When GNOME can't place a window, Icon Fix finds the matching `.desktop` file the way KDE does. First it uses what the launcher knows about the game:
 
-- **Steam app ID** from `steam_app_N` or the game's environment. This also covers non-Steam shortcuts.
+| Launcher | How a running game is recognized | Without a shortcut |
+|---|---|---|
+| **Steam** (native, Flatpak, Snap), **Proton** | `steam_app_N` class, `SteamAppId`/`SteamGameId`, the Proton prefix `compatdata/N`, umu's `GAMEID`, or the game's folder in a Steam library. Covers non-Steam shortcuts. | Steam's icon and the game's name |
+| **Heroic** (Epic, GOG, Amazon, sideloaded) | `HEROIC_APP_NAME`, or the install folder from Heroic's `installed.json` | Heroic's icon and the game's title |
+| **Lutris** | The game's `exe` and Wine prefix from its Lutris config, or its folder | Lutris' `lutris_<slug>` icon |
+| **Bottles** | The program's `.exe` from `bottle.yml` together with `WINEPREFIX`, so two bottles with the same `Launcher.exe` stay apart | The icon Bottles extracted from the `.exe` |
+| **Wine** | Menu entries made by Wine itself, matched by `.exe` and prefix | |
+| **Snap**, **AppImage**, **Flatpak** | `SNAP_NAME`, `APPIMAGE`, the Flatpak app ID | |
+
+Then, for any app:
+
 - **Window class**, matched against `StartupWMClass`, `Exec=`, `Icon=` and `Name=`.
-- **Process name**, including Wine/Proton `.exe` files.
+- **Program**: its path or name, including Wine `.exe` files, behind wrappers such as `gamescope`, `gamemoderun` and `mangohud`.
+- **Install folder**: a game started from inside the folder of a shortcut's program or `Path=` (GOG installers, Minigalaxy, itch.io, scripts).
 - **Window title**, as a last resort.
 
-It works with the dock (including Dash to Dock), Alt+Tab and the overview, and has no measurable CPU impact.
+It works with the dock (including Dash to Dock), Alt+Tab and the overview, and has no measurable CPU impact: a window's process is looked up once, launcher files are read only for windows GNOME couldn't place and only again after they change, and a changing window title costs a single table lookup.
+
+### Steam from Flathub
+
+Flatpak Steam (`com.valvesoftware.Steam`) writes its game shortcuts inside its sandbox, where GNOME never looks, and their `Exec=steam …` doesn't exist on the host. So installed games are missing from search and the app grid.
+
+Turn on **Show Flatpak Steam games** in the extension's preferences (off by default). Icon Fix then mirrors each game into `~/.local/share/applications/steam-flatpak-<id>.desktop`:
+
+- launches with `flatpak run com.valvesoftware.Steam steam://rungameid/<id>`;
+- uses the game's icon from the sandbox;
+- sets `StartupWMClass=steam_app_<id>`.
+
+The mirror stays in sync as you install or remove games. Icon Fix only writes and deletes files it generated itself. Turning the option off removes them.
+
+### Running games from Flatpak launchers
+
+GNOME assigns every window from a Flatpak sandbox to that sandbox's app, whatever `StartupWMClass` says. So a game started by Steam, Heroic, Lutris or Bottles from Flathub shows up as the launcher itself in the dock and Alt+Tab.
+
+Icon Fix moves such windows to the game's own entry, when it can find one, as Dash to Dock does for its file manager windows. The game then gets its own icon in the dock, Alt+Tab and the overview, and clicking it brings the running game up instead of launching it again. The launcher's own windows stay with the launcher.
 
 ## Install
 
@@ -52,17 +81,36 @@ Supports GNOME Shell 45 to 51.
 
 ```
 src/
-├── extension.js   # patches app icons/names for unmatched windows
-├── matcher.js     # .desktop matching heuristics (no Shell imports, testable with gjs)
-├── prefs.js       # preferences window
+├── extension.js        # patches app icons/names for unmatched windows, caches results
+├── prefs.js            # preferences window
+├── lib/                # no Shell imports: runs and tests with plain gjs
+│   ├── appindex.js     # lookup tables over the installed .desktop entries
+│   ├── matcher.js      # matching order: sources, class, program, folder, title
+│   ├── process.js      # /proc reading, argv parsing, Wine path translation
+│   ├── formats.js      # YAML (Bottles, Lutris) and VDF (Steam) readers
+│   └── util.js         # paths, file caches
+├── sources/            # one file per launcher, see registry.js for the interface
+│   ├── registry.js
+│   ├── steam.js
+│   ├── heroic.js
+│   ├── lutris.js
+│   ├── bottles.js
+│   ├── wine.js
+│   └── packaging.js    # Snap, AppImage
+├── mirror/
+│   └── steam-flatpak.js  # optional Flatpak Steam shortcut mirror
 ├── metadata.json
-└── qr/            # donation QR codes
+├── schemas/            # GSettings schema
+└── qr/                 # donation QR codes
 ```
+
+To support another launcher, add a file to `sources/` and list it in `sources/registry.js`.
 
 | Command | What it does |
 |---|---|
 | `make pack` | Builds `dist/icon-fix@adavidys.shell-extension.zip` for [extensions.gnome.org](https://extensions.gnome.org/upload/) |
 | `make install` | Builds and installs the extension for the current user |
+| `make schemas` | Compiles the schema in `src/`, needed when `src/` is symlinked into the extensions folder |
 | `make uninstall` | Removes it |
 | `make clean` | Deletes `dist/` |
 

@@ -1,0 +1,227 @@
+// GNOME matches every window from a Flatpak sandbox to that sandbox's app,
+// whatever StartupWMClass says. For launchers from Flathub that means every
+// game shows up as "Steam" (or Heroic, Lutris, Bottles) in the dock and
+// Alt+Tab. The window tracker is C code we can't change, so, like Dash to
+// Dock does for its file manager locations, we move such windows over in
+// the JS layer everything reads from: get_running(), get_window_app() and
+// the windows/state/activation of the two apps involved.
+
+import GLib from 'gi://GLib';
+import Shell from 'gi://Shell';
+
+import {InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
+
+export const LAUNCHER_SANDBOXES = new Set([
+    'com.valvesoftware.Steam',
+    'com.heroicgameslauncher.hgl',
+    'net.lutris.Lutris',
+    'com.usebottles.bottles',
+]);
+
+// Per-app overrides, installed on the app objects themselves.
+const APP_METHODS = [
+    'get_windows', 'get_n_windows', 'get_state', 'get_pids', 'is_on_workspace',
+    'activate', 'activate_full', 'activate_window',
+];
+
+export class WindowSplitter {
+    // findApp(win): the Shell.App a launcher-sandboxed window really
+    // belongs to, or null to leave it with its launcher.
+    constructor(findApp) {
+        this._findApp = findApp;
+        this._appSystem = Shell.AppSystem.get_default();
+        this._tracker = Shell.WindowTracker.get_default();
+        // window -> {app, host}
+        this._moved = new Map();
+        // Apps we put overrides on -> their own windows (null for hosts:
+        // they keep theirs minus the moved ones)
+        this._patched = new Map();
+        this._refreshId = 0;
+
+        const splitter = this;
+        this._injections = new InjectionManager();
+        this._injections.overrideMethod(Shell.AppSystem.prototype, 'get_running', original => function () {
+            // A launcher whose only windows were games isn't running anymore.
+            const running = original.call(this).filter(app =>
+                splitter._patched.get(app) !== null || app.get_state() !== Shell.AppState.STOPPED);
+            if (!splitter._moved.size)
+                return running;
+            for (const app of splitter._targets()) {
+                if (!running.includes(app))
+                    running.push(app);
+            }
+            // Most recently used first, like GNOME's own order (Alt+Tab
+            // relies on it); the moved windows changed who that is.
+            const lastUsed = app => Math.max(0, ...app.get_windows().map(w => w.get_user_time()));
+            return running.sort((a, b) => lastUsed(b) - lastUsed(a));
+        });
+        this._injections.overrideMethod(Shell.WindowTracker.prototype, 'get_window_app', original => function (win) {
+            return splitter._moved.get(win)?.app ?? original.call(this, win);
+        });
+
+        global.display.connectObject('window-created',
+            (_display, win) => this._watch(win), this);
+        for (const actor of global.get_window_actors())
+            this._watch(actor.meta_window);
+    }
+
+    destroy() {
+        if (this._refreshId)
+            GLib.source_remove(this._refreshId);
+        global.display.disconnectObject(this);
+        for (const win of this._moved.keys())
+            win.disconnectObject(this);
+        this._injections.clear();
+
+        const apps = [...this._patched.keys()];
+        for (const app of apps)
+            unpatchApp(app);
+        this._moved.clear();
+        this._patched.clear();
+        for (const app of apps)
+            this._notify(app);
+    }
+
+    // Window class and pid can arrive after window-created; ask again on
+    // the first change, and whenever the index behind findApp changes.
+    recheckAll() {
+        for (const actor of global.get_window_actors())
+            this._check(actor.meta_window);
+    }
+
+    _watch(win) {
+        if (!LAUNCHER_SANDBOXES.has(win.get_sandboxed_app_id()))
+            return;
+        win.connectObject(
+            'notify::wm-class', () => this._check(win),
+            'unmanaged', () => this._release(win), this);
+        this._check(win);
+    }
+
+    _check(win) {
+        if (!LAUNCHER_SANDBOXES.has(win.get_sandboxed_app_id()) || win.is_override_redirect())
+            return;
+        const current = this._moved.get(win);
+        const host = current?.host ?? this._tracker.get_window_app(win);
+        const app = this._findApp(win);
+        if (!app || !host || app === host) {
+            if (current)
+                this._release(win);
+            return;
+        }
+        if (current?.app === app)
+            return;
+        if (current)
+            this._release(win);
+
+        this._moved.set(win, {app, host});
+        this._patchHost(host);
+        this._patchTarget(app);
+        this._queueRefresh();
+    }
+
+    _release(win) {
+        if (!this._moved.has(win))
+            return;
+        this._moved.delete(win);
+        this._queueRefresh();
+    }
+
+    _targets() {
+        return new Set([...this._moved.values()].map(m => m.app));
+    }
+
+    _patchHost(host) {
+        if (this._patched.has(host))
+            return;
+        this._patched.set(host, null);
+        const moved = () => [...this._moved.keys()];
+        const original = saveOriginals(host);
+        patchApp(host, {
+            get_windows: () => original.get_windows().filter(w => !moved().includes(w)),
+            get_n_windows: () => host.get_windows().length,
+            get_state: () => host.get_n_windows() || original.get_state() !== Shell.AppState.RUNNING
+                ? original.get_state() : Shell.AppState.STOPPED,
+            activate_window: (win, time) => original.activate_window(win ?? host.get_windows()[0] ?? null, time),
+        });
+    }
+
+    _patchTarget(app) {
+        if (this._patched.has(app))
+            return;
+        this._patched.set(app, true);
+        const own = () => [...this._moved].filter(([, m]) => m.app === app).map(([w]) => w)
+            .sort((a, b) => b.get_user_time() - a.get_user_time());
+        const original = saveOriginals(app);
+        const running = () => own().length > 0;
+        const focus = (win, time) => {
+            win ??= own()[0];
+            if (!win)
+                return;
+            const workspace = win.get_workspace();
+            if (workspace && workspace !== global.workspace_manager.get_active_workspace())
+                workspace.activate_with_focus(win, time || global.get_current_time());
+            else
+                win.activate(time || global.get_current_time());
+        };
+        patchApp(app, {
+            get_windows: own,
+            get_n_windows: () => own().length,
+            get_state: () => running() ? Shell.AppState.RUNNING : original.get_state(),
+            get_pids: () => [...new Set(own().map(w => w.get_pid()).filter(p => p > 0))],
+            is_on_workspace: ws => own().some(w => w.located_on_workspace(ws)) || original.is_on_workspace(ws),
+            // Clicking a running game must focus it, not start it again.
+            activate: () => running() ? focus(null, 0) : original.activate(),
+            activate_full: (ws, time) => running() ? focus(null, time) : original.activate_full(ws, time),
+            activate_window: (win, time) => running() ? focus(win, time) : original.activate_window(win, time),
+        });
+    }
+
+    // Signals go out from an idle: this runs from window-created, where
+    // the tracker hasn't finished its own bookkeeping yet.
+    _queueRefresh() {
+        if (this._refreshId)
+            return;
+        this._refreshId = GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+            this._refreshId = 0;
+            const inUse = new Set([...this._moved.values()].flatMap(m => [m.app, m.host]));
+            for (const app of [...this._patched.keys()]) {
+                // Done with it: drop the overrides once it is back to normal.
+                if (!inUse.has(app)) {
+                    unpatchApp(app);
+                    this._patched.delete(app);
+                }
+                this._notify(app);
+            }
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _notify(app) {
+        app.emit('windows-changed');
+        app.notify('state');
+        this._appSystem.emit('app-state-changed', app);
+    }
+}
+
+function saveOriginals(app) {
+    const original = {};
+    for (const name of APP_METHODS)
+        original[name] = (...args) => Shell.App.prototype[name].call(app, ...args);
+    return original;
+}
+
+function patchApp(app, methods) {
+    for (const [name, fn] of Object.entries(methods))
+        app[name] = fn;
+    Object.defineProperty(app, 'state', {
+        get: () => app.get_state(),
+        configurable: true,
+    });
+}
+
+function unpatchApp(app) {
+    for (const name of APP_METHODS)
+        delete app[name];
+    delete app.state;
+}

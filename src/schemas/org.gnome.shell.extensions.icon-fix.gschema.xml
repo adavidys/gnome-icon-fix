@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.icon-fix" path="/org/gnome/shell/extensions/icon-fix/">
+    <key name="flatpak-steam" type="b">
+      <default>false</default>
+      <summary>Add Flatpak Steam games to the app grid and search</summary>
+      <description>Mirrors the game shortcuts of Steam from Flathub (com.valvesoftware.Steam) into ~/.local/share/applications as steam-flatpak-*.desktop files with a working Exec line. Turning it off removes them again.</description>
+    </key>
+  </schema>
+</schemalist>

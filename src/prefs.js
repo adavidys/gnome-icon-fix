@@ -1,5 +1,6 @@
-// Preferences window: there is nothing to configure yet, so it only hosts
-// the support page with a coin switcher, QR code and copyable address.
+// Preferences window: a General page with the optional Flatpak Steam
+// support, and a support page with a coin switcher, QR code and copyable
+// address.
 
 import Adw from 'gi://Adw';
 import Gdk from 'gi://Gdk';
@@ -51,6 +52,29 @@ export default class IconFixPreferences extends ExtensionPreferences {
             provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
 
         window.set_default_size(520, 640);
+
+        const general = new Adw.PreferencesPage({
+            title: 'General',
+            icon_name: 'preferences-system-symbolic',
+        });
+        window.add(general);
+
+        const flatpakGroup = new Adw.PreferencesGroup({
+            title: 'Flatpak Steam',
+            description: 'Steam from Flathub keeps its game shortcuts inside its sandbox, ' +
+                'so GNOME can\'t find them. This copies them to ' +
+                '~/.local/share/applications as steam-flatpak-*.desktop files ' +
+                'that launch through Flatpak. Your own .desktop files are never touched.',
+        });
+        general.add(flatpakGroup);
+
+        const flatpakRow = new Adw.SwitchRow({
+            title: 'Show Flatpak Steam games',
+            subtitle: 'In the app grid and search, with their icons',
+        });
+        this.getSettings().bind('flatpak-steam', flatpakRow, 'active',
+            Gio.SettingsBindFlags.DEFAULT);
+        flatpakGroup.add(flatpakRow);
 
         const page = new Adw.PreferencesPage({
             title: 'Support',

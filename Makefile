@@ -1,10 +1,17 @@
 UUID := icon-fix@adavidys
 ZIP := dist/$(UUID).shell-extension.zip
-SOURCES := $(shell find src -type f) LICENSE
+SOURCES := $(shell find src -type f ! -name gschemas.compiled) LICENSE
 
-.PHONY: all pack install uninstall clean
+.PHONY: all pack schemas install uninstall clean
 
 all: pack
+
+# Only needed when running straight from src/ (e.g. a symlinked dev install);
+# gnome-extensions pack/install compile the schema themselves.
+schemas: src/schemas/gschemas.compiled
+
+src/schemas/gschemas.compiled: src/schemas/*.gschema.xml
+	glib-compile-schemas src/schemas
 
 # Zip for https://extensions.gnome.org/upload/
 pack: $(ZIP)
@@ -12,7 +19,10 @@ pack: $(ZIP)
 $(ZIP): $(SOURCES)
 	@mkdir -p dist
 	gnome-extensions pack src --force --out-dir=dist \
-		--extra-source=matcher.js \
+		--extra-source=split.js \
+		--extra-source=lib \
+		--extra-source=sources \
+		--extra-source=mirror \
 		--extra-source=qr \
 		--extra-source=../LICENSE
 
@@ -24,4 +34,4 @@ uninstall:
 	gnome-extensions uninstall $(UUID)
 
 clean:
-	rm -rf dist
+	rm -rf dist src/schemas/gschemas.compiled

@@ -1,0 +1,110 @@
+// Finds the .desktop entry for a window GNOME could not match by itself,
+// KDE-style: first the sources' exact signals (Steam app ids, Wine prefixes,
+// launcher configs...), then window class, program and install folder, then
+// the window title. When nothing matches, a source may still know an icon.
+//
+// The title is matched separately (matchTitle) because it can change at
+// frame rate (FPS counters) while everything else stays the same.
+
+import {tryCall} from './appindex.js';
+import {GENERIC_BINARIES, isWineProcess, programFromArgv, winePrefixOf, wineToHost} from './process.js';
+import {basename, canonical, exeStem, normalize} from './util.js';
+
+const NO_PROCESS = {pid: 0, argv: [], exe: null, cwd: null, env: {}};
+
+// What the sources get to see about a window, worked out once:
+//   wmClass, wmInstance, gtkId, sandboxId: from the window
+//   proc, env: from readProcess()
+//   wine: whether it's a Wine process; prefix: its Wine prefix
+//   stems: lowercased program names without extension ("game" for
+//          C:\Games\Game.exe, and the window class for Wine)
+//   paths: host paths of the program; cwd: its working folder
+// Sources may add their own fields to share work between their calls.
+export function windowContext(hints) {
+    const proc = hints.proc ?? NO_PROCESS;
+    const wine = isWineProcess(proc);
+    const prefix = winePrefixOf(proc, wine);
+    const stems = new Set();
+    const paths = new Set();
+
+    const addProgram = path => {
+        stems.add(exeStem(path));
+        const host = wine ? wineToHost(path, prefix) : canonical(path);
+        if (host)
+            paths.add(host);
+    };
+    const program = programFromArgv(proc.argv);
+    if (program?.flatpak)
+        stems.add(program.flatpak);
+    else if (program?.path)
+        addProgram(program.path);
+    if (proc.exe && !GENERIC_BINARIES.has(basename(proc.exe).toLowerCase()))
+        addProgram(proc.exe);
+    // Wine names its windows after the .exe.
+    if (wine) {
+        for (const cls of [hints.wmClass, hints.wmInstance].filter(Boolean))
+            stems.add(exeStem(cls));
+    }
+    stems.delete('');
+
+    return {
+        wmClass: hints.wmClass ?? null,
+        wmInstance: hints.wmInstance ?? null,
+        gtkId: hints.gtkId ?? null,
+        sandboxId: hints.sandboxId ?? null,
+        proc,
+        env: proc.env,
+        wine,
+        prefix,
+        stems: [...stems],
+        paths: [...paths],
+        cwd: canonical(proc.cwd),
+    };
+}
+
+function identify(index, sources, ctx) {
+    for (const source of sources) {
+        const found = tryCall(source, 'identify', ctx, index);
+        if (found)
+            return found;
+    }
+
+    for (const key of [ctx.sandboxId, ctx.gtkId, ctx.wmClass, ctx.wmInstance]) {
+        const id = index.lookup(key);
+        if (id)
+            return {id};
+    }
+
+    const exact = index.exactPath(ctx.paths);
+    if (exact)
+        return {id: exact};
+
+    for (const stem of ctx.stems) {
+        const id = index.lookup(stem);
+        if (id)
+            return {id};
+    }
+
+    const near = index.nearestDir(ctx.cwd ? [...ctx.paths, ctx.cwd] : ctx.paths);
+    return near ? {id: near} : null;
+}
+
+// hints: {wmClass, wmInstance, gtkId, sandboxId, proc}
+// Returns {primary, fallbacks}: primary is {id} of a desktop entry or null;
+// fallbacks (only looked for without a primary) are what the sources would
+// show instead, best first: [{iconName?, icon?, name?}].
+export function matchWindow(index, sources, hints) {
+    const ctx = windowContext(hints);
+    const primary = identify(index, sources, ctx);
+    if (primary)
+        return {primary, fallbacks: []};
+    return {
+        primary: null,
+        fallbacks: sources.map(s => tryCall(s, 'fallback', ctx, index)).filter(Boolean),
+    };
+}
+
+export function matchTitle(index, title) {
+    const id = index.name.get(normalize(title));
+    return id ? {id} : null;
+}

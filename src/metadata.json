@@ -1,8 +1,9 @@
 {
   "uuid": "icon-fix@adavidys",
   "name": "Icon Fix",
-  "description": "Shows the proper icon and name for Steam games and other apps that GNOME can't match to their .desktop file, so you no longer have to add StartupWMClass to every game by hand.\n\nWorks with the dock (including Dash to Dock), Alt+Tab and the overview. It matches windows the way KDE does: by Steam app ID (including non-Steam shortcuts), window class, process or Wine/Proton .exe name, and window title. Your .desktop files are never modified.",
+  "description": "Shows the proper icon and name for Steam games and other apps that GNOME can't match to their .desktop file, so you no longer have to add StartupWMClass to every game by hand.\n\nWorks with the dock (including Dash to Dock), Alt+Tab and the overview. It matches windows the way KDE does, and knows Steam and Proton (including non-Steam shortcuts), Heroic, Lutris, Bottles, Wine, Snap and AppImage: by app ID, Wine prefix and .exe, window class, program, install folder and window title. Your .desktop files are never modified.\n\nOptional: add games from the Flatpak version of Steam to the app grid and search (off by default, see preferences).",
   "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
   "url": "https://github.com/adavidys/gnome-icon-fix",
-  "version-name": "1.0"
+  "version-name": "1.1",
+  "settings-schema": "org.gnome.shell.extensions.icon-fix"
 }

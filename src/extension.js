@@ -1,7 +1,8 @@
 // When GNOME can't map a window to a .desktop file it creates a
 // "window-backed" app with a generic icon. Instead of requiring
 // StartupWMClass, we guess the right .desktop entry (KDE-style heuristics,
-// see matcher.js) and make those apps report its icon and name.
+// see lib/matcher.js and sources/) and make those apps report its icon and
+// name.
 
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
@@ -11,7 +12,12 @@ import St from 'gi://St';
 import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {AppIndex, match, readProcess} from './matcher.js';
+import {AppIndex} from './lib/appindex.js';
+import {matchTitle, matchWindow} from './lib/matcher.js';
+import {readProcess} from './lib/process.js';
+import {FlatpakSteamMirror} from './mirror/steam-flatpak.js';
+import {createSources, envKeys} from './sources/registry.js';
+import {WindowSplitter} from './split.js';
 
 export default class IconFixExtension extends Extension {
     enable() {
@@ -19,6 +25,12 @@ export default class IconFixExtension extends Extension {
         this._tracker = Shell.WindowTracker.get_default();
         this._iconTheme = new St.IconTheme();
         this._cache = new WeakMap();
+        // pid -> what /proc says about it. Unlike _cache it survives index
+        // rebuilds (installed-changed fires in bursts while Steam installs),
+        // and is dropped when the process's last window goes away.
+        this._procs = new Map();
+        this._sources = createSources();
+        this._envKeys = envKeys(this._sources);
         this._windows = new Set();
         this._pendingNotify = new Set();
         this._notifyId = 0;
@@ -28,6 +40,7 @@ export default class IconFixExtension extends Extension {
             this._iconTheme = new St.IconTheme();
             this._buildIndex();
             this._cache = new WeakMap();
+            this._splitter.recheckAll();
             this._refreshRunning();
         }, this);
 
@@ -36,12 +49,26 @@ export default class IconFixExtension extends Extension {
         for (const actor of global.get_window_actors())
             this._watchWindow(actor.meta_window);
 
+        this._settings = this.getSettings();
+        this._settings.connectObject('changed::flatpak-steam',
+            () => this._syncFlatpakSteam(true), this);
+        this._syncFlatpakSteam(false);
+
         this._patch();
+        this._splitter = new WindowSplitter(win => this._launcherGameApp(win));
         this._refreshRunning();
     }
 
     disable() {
+        this._splitter.destroy();
+        this._splitter = null;
         this._unpatch();
+
+        // Keep the generated shortcuts: disable() also runs on screen lock.
+        this._flatpakMirror?.destroy();
+        this._flatpakMirror = null;
+        this._settings.disconnectObject(this);
+        this._settings = null;
 
         global.display.disconnectObject(this);
         this._appSystem.disconnectObject(this);
@@ -62,7 +89,22 @@ export default class IconFixExtension extends Extension {
         this._tracker = null;
         this._iconTheme = null;
         this._cache = null;
+        this._procs = null;
+        this._sources = null;
+        this._envKeys = null;
         this._index = null;
+    }
+
+    _syncFlatpakSteam(toggled) {
+        const enabled = this._settings.get_boolean('flatpak-steam');
+        if (enabled && !this._flatpakMirror) {
+            this._flatpakMirror = new FlatpakSteamMirror();
+        } else if (!enabled) {
+            this._flatpakMirror?.destroy();
+            this._flatpakMirror = null;
+            if (toggled)
+                FlatpakSteamMirror.removeAll();
+        }
     }
 
     _buildIndex() {
@@ -77,9 +119,10 @@ export default class IconFixExtension extends Extension {
                 wmClass: info.get_startup_wm_class(),
                 exec: info.get_string('Exec'),
                 icon: info.get_string('Icon'),
+                path: info.get_string('Path'),
             });
         }
-        this._index = new AppIndex(entries);
+        this._index = new AppIndex(entries, this._sources);
     }
 
     _patch() {
@@ -112,7 +155,7 @@ export default class IconFixExtension extends Extension {
             const found = ext._resolve(this);
             if (found?.app)
                 return original.call(found.app);
-            return original.call(this);
+            return found?.name ?? original.call(this);
         });
     }
 
@@ -121,8 +164,8 @@ export default class IconFixExtension extends Extension {
         this._injections = null;
     }
 
-    // Returns {app: Shell.App} or {gicon: Gio.Icon} for a window-backed
-    // app we could identify, null otherwise.
+    // Returns {app: Shell.App} or {gicon: Gio.Icon | null, name} for a
+    // window-backed app we could identify, null otherwise.
     _resolve(app) {
         if (!this._index || !app.is_window_backed())
             return null;
@@ -132,41 +175,85 @@ export default class IconFixExtension extends Extension {
         if (!win)
             return cached?.result ?? null;
 
-        const key = `${win.get_wm_class()}\n${win.get_pid()}`;
+        const pid = win.get_pid();
+        const key = `${win.get_wm_class()}\n${pid}`;
         const title = win.get_title();
-        // A hit is kept while class and pid stay; a miss is retried when the
-        // title changes, since the title is one of the things we match on.
-        if (cached?.key === key && (cached.result || cached.title === title))
+        if (cached?.key === key && cached.title === title)
             return cached.result;
 
-        // Same process as last time: only the title changed, so reuse what
-        // /proc told us instead of reading it again (titles can change at
-        // frame rate, e.g. FPS counters).
-        const proc = cached?.key === key ? cached.proc : readProcess(win.get_pid());
-        const found = match(this._index, {
-            wmClass: win.get_wm_class(),
-            wmInstance: win.get_wm_class_instance(),
-            gtkId: win.get_gtk_application_id(),
-            sandboxId: win.get_sandboxed_app_id(),
-            title,
-            proc,
-        });
-
-        let result = null;
-        if (found?.id) {
-            const target = this._appSystem.lookup_app(found.id);
-            if (target)
-                result = {app: target, tag: found.id};
-        } else if (found?.steamId) {
-            const name = `steam_icon_${found.steamId}`;
-            if (this._iconTheme.has_icon(name))
-                result = {gicon: new Gio.ThemedIcon({name}), tag: name};
+        // Everything but the title is looked up once per class and process
+        // (and again after the index changes). Titles can change at frame
+        // rate (FPS counters), so a title change only redoes that lookup.
+        let found = cached?.key === key ? cached : null;
+        if (!found) {
+            const {primary, fallbacks} = matchWindow(this._index, this._sources, {
+                wmClass: win.get_wm_class(),
+                wmInstance: win.get_wm_class_instance(),
+                gtkId: win.get_gtk_application_id(),
+                sandboxId: win.get_sandboxed_app_id(),
+                proc: this._procInfo(pid),
+            });
+            const shown = fallbacks.map(f => this._realize(f)).filter(Boolean);
+            found = {
+                key,
+                primary: this._realize(primary),
+                // An icon beats a name alone.
+                fallback: shown.find(f => f.gicon) ?? shown[0] ?? null,
+            };
         }
 
-        this._cache.set(app, {key, title, proc, result});
+        const result = found.primary ?? this._realize(matchTitle(this._index, title)) ?? found.fallback;
+        this._cache.set(app, {key, primary: found.primary, fallback: found.fallback, title, result});
         if (cached && cached.result?.tag !== result?.tag)
             this._queueNotify(app);
         return result;
+    }
+
+    // Turns a match into what the patched methods return, or null when it
+    // can't be shown (the entry or icon has gone away).
+    _realize(found) {
+        if (!found)
+            return null;
+        if (found.id) {
+            const app = this._appSystem.lookup_app(found.id);
+            return app ? {app, tag: found.id} : null;
+        }
+        let gicon = null;
+        let tag = null;
+        if (found.iconName && this._iconTheme.has_icon(found.iconName)) {
+            gicon = new Gio.ThemedIcon({name: found.iconName});
+            tag = found.iconName;
+        } else if (found.icon && GLib.file_test(found.icon, GLib.FileTest.EXISTS)) {
+            gicon = new Gio.FileIcon({file: Gio.File.new_for_path(found.icon)});
+            tag = found.icon;
+        }
+        if (!gicon && !found.name)
+            return null;
+        return {gicon, name: found.name ?? null, tag: `${tag}\n${found.name}`};
+    }
+
+    // For a window inside a launcher's Flatpak sandbox: the app of the game
+    // running in it. Matched as if it weren't sandboxed, so the launcher's
+    // own windows (no game id in their environment) stay with the launcher.
+    _launcherGameApp(win) {
+        if (!this._index)
+            return null;
+        const {primary} = matchWindow(this._index, this._sources, {
+            wmClass: win.get_wm_class(),
+            wmInstance: win.get_wm_class_instance(),
+            gtkId: win.get_gtk_application_id(),
+            proc: this._procInfo(win.get_pid()),
+        });
+        return primary ? this._appSystem.lookup_app(primary.id) : null;
+    }
+
+    _procInfo(pid) {
+        let info = this._procs.get(pid);
+        if (!info) {
+            info = readProcess(pid, this._envKeys);
+            this._procs.set(pid, info);
+        }
+        return info;
     }
 
     _watchWindow(win) {
@@ -184,6 +271,9 @@ export default class IconFixExtension extends Extension {
             'unmanaged', () => {
                 win.disconnectObject(this);
                 this._windows.delete(win);
+                const pid = win.get_pid();
+                if (![...this._windows].some(w => w.get_pid() === pid))
+                    this._procs.delete(pid);
             }, this);
     }
 
