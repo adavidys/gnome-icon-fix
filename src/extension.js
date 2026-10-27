@@ -55,7 +55,7 @@ export default class IconFixExtension extends Extension {
         this._syncFlatpakSteam(false);
 
         this._patch();
-        this._splitter = new WindowSplitter(win => this._launcherGameApp(win));
+        this._splitter = new WindowSplitter((win, splitter) => this._launcherGameApp(win, splitter));
         this._refreshRunning();
     }
 
@@ -235,16 +235,28 @@ export default class IconFixExtension extends Extension {
     // For a window inside a launcher's Flatpak sandbox: the app of the game
     // running in it. Matched as if it weren't sandboxed, so the launcher's
     // own windows (no game id in their environment) stay with the launcher.
-    _launcherGameApp(win) {
+    _launcherGameApp(win, splitter) {
         if (!this._index)
             return null;
-        const {primary} = matchWindow(this._index, this._sources, {
+        const {primary, fallbacks} = matchWindow(this._index, this._sources, {
             wmClass: win.get_wm_class(),
             wmInstance: win.get_wm_class_instance(),
             gtkId: win.get_gtk_application_id(),
             proc: this._procInfo(win.get_pid()),
         });
-        return primary ? this._appSystem.lookup_app(primary.id) : null;
+        if (primary)
+            return this._appSystem.lookup_app(primary.id);
+
+        // No .desktop for it (Flatpak Bottles can't create one): still give
+        // the game its own entry if a source knows its name and icon.
+        for (const found of fallbacks) {
+            const icon = found.icon && GLib.file_test(found.icon, GLib.FileTest.EXISTS)
+                ? found.icon
+                : found.iconName && this._iconTheme.has_icon(found.iconName) && found.iconName;
+            if (found.name && icon)
+                return splitter.virtualApp(found.name, icon);
+        }
+        return null;
     }
 
     _procInfo(pid) {

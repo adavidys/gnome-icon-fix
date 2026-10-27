@@ -6,10 +6,112 @@
 // the JS layer everything reads from: get_running(), get_window_app() and
 // the windows/state/activation of the two apps involved.
 
+import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import GObject from 'gi://GObject';
 import Shell from 'gi://Shell';
 
 import {InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
+
+// Gio.DesktopAppInfo moved to GioUnix in newer GLib.
+let DesktopAppInfo;
+try {
+    DesktopAppInfo = (await import('gi://GioUnix')).default.DesktopAppInfo;
+} catch {}
+DesktopAppInfo ??= Gio.DesktopAppInfo;
+
+// The app info of a game with no .desktop file. Shell's C code reads the
+// id, name and icon through these vfuncs (a JS-side get_id override isn't
+// seen there, and a NULL id crashes the shell), the same way Dash to Dock
+// builds its location apps. A DesktopAppInfo so Shell.App accepts it.
+const VirtualAppInfo = GObject.registerClass({
+    Implements: [Gio.AppInfo],
+}, class VirtualAppInfo extends DesktopAppInfo {
+    _init(id, name, icon) {
+        super._init();
+        this._id = id;
+        this._name = name;
+        this._icon = icon;
+    }
+
+    list_actions() {
+        return [];
+    }
+
+    get_action_name() {
+        return null;
+    }
+
+    get_boolean() {
+        return false;
+    }
+
+    get_string() {
+        return null;
+    }
+
+    vfunc_dup() {
+        return new VirtualAppInfo(this._id, this._name, this._icon);
+    }
+
+    vfunc_equal(other) {
+        return other?.get_id() === this._id;
+    }
+
+    vfunc_get_id() {
+        return this._id;
+    }
+
+    vfunc_get_name() {
+        return this._name;
+    }
+
+    vfunc_get_display_name() {
+        return this._name;
+    }
+
+    vfunc_get_description() {
+        return null;
+    }
+
+    vfunc_get_executable() {
+        return null;
+    }
+
+    vfunc_get_commandline() {
+        return null;
+    }
+
+    vfunc_get_icon() {
+        return this._icon;
+    }
+
+    // Never launched: it only exists while the game runs, and activating
+    // a running app focuses its window.
+    vfunc_launch() {
+        return false;
+    }
+
+    vfunc_launch_uris() {
+        return false;
+    }
+
+    vfunc_supports_uris() {
+        return false;
+    }
+
+    vfunc_supports_files() {
+        return false;
+    }
+
+    vfunc_should_show() {
+        return false;
+    }
+
+    vfunc_can_delete() {
+        return false;
+    }
+});
 
 export const LAUNCHER_SANDBOXES = new Set([
     'com.valvesoftware.Steam',
@@ -25,14 +127,16 @@ const APP_METHODS = [
 ];
 
 export class WindowSplitter {
-    // findApp(win): the Shell.App a launcher-sandboxed window really
-    // belongs to, or null to leave it with its launcher.
+    // findApp(win, splitter): the Shell.App a launcher-sandboxed window
+    // really belongs to, or null to leave it with its launcher.
     constructor(findApp) {
         this._findApp = findApp;
         this._appSystem = Shell.AppSystem.get_default();
         this._tracker = Shell.WindowTracker.get_default();
         // window -> {app, host}
         this._moved = new Map();
+        // "name\nicon" -> in-memory app, see virtualApp()
+        this._virtual = new Map();
         // Apps we put overrides on -> their own windows (null for hosts:
         // they keep theirs minus the moved ones)
         this._patched = new Map();
@@ -78,8 +182,32 @@ export class WindowSplitter {
             unpatchApp(app);
         this._moved.clear();
         this._patched.clear();
+        this._virtual.clear();
         for (const app of apps)
             this._notify(app);
+    }
+
+    // An app for a game that has no .desktop file, built in memory from its
+    // name and icon (a path or icon name). It never shows up in the app
+    // grid; it exists while its windows do. Returns null if GNOME won't
+    // let us build one.
+    virtualApp(name, icon) {
+        const key = `${name}\n${icon}`;
+        if (this._virtual.has(key))
+            return this._virtual.get(key);
+
+        let app = null;
+        try {
+            const id = `icon-fix-virtual-${GLib.compute_checksum_for_string(GLib.ChecksumType.SHA1, key, -1).slice(0, 12)}.desktop`;
+            const gicon = icon.startsWith('/')
+                ? new Gio.FileIcon({file: Gio.File.new_for_path(icon)})
+                : new Gio.ThemedIcon({name: icon});
+            app = new Shell.App({app_info: new VirtualAppInfo(id, name, gicon)});
+        } catch (e) {
+            console.error(`Icon Fix: can't create an app for ${name}: ${e}`);
+        }
+        this._virtual.set(key, app);
+        return app;
     }
 
     // Window class and pid can arrive after window-created; ask again on
@@ -103,7 +231,7 @@ export class WindowSplitter {
             return;
         const current = this._moved.get(win);
         const host = current?.host ?? this._tracker.get_window_app(win);
-        const app = this._findApp(win);
+        const app = this._findApp(win, this);
         if (!app || !host || app === host) {
             if (current)
                 this._release(win);
