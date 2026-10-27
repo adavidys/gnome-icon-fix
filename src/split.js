@@ -13,6 +13,7 @@ import Shell from 'gi://Shell';
 
 import {InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 
+import * as log from './lib/log.js';
 import {LAUNCHER_SANDBOXES} from './lib/util.js';
 
 // Gio.DesktopAppInfo moved to GioUnix in newer GLib.
@@ -151,8 +152,9 @@ export class WindowSplitter {
             }
             // Most recently used first, like GNOME's own order (Alt+Tab
             // relies on it); the moved windows changed who that is.
-            const lastUsed = app => Math.max(0, ...app.get_windows().map(w => w.get_user_time()));
-            return running.sort((a, b) => lastUsed(b) - lastUsed(a));
+            const lastUsed = new Map(running.map(app =>
+                [app, app.get_windows().reduce((t, w) => Math.max(t, w.get_user_time()), 0)]));
+            return running.sort((a, b) => lastUsed.get(b) - lastUsed.get(a));
         });
         this._injections.overrideMethod(Shell.WindowTracker.prototype, 'get_window_app', original => function (win) {
             return splitter._moved.get(win)?.app ?? original.call(this, win);
@@ -194,8 +196,9 @@ export class WindowSplitter {
         try {
             const id = `icon-fix-virtual-${GLib.compute_checksum_for_string(GLib.ChecksumType.SHA1, key, -1).slice(0, 12)}.desktop`;
             app = new Shell.App({app_info: new VirtualAppInfo(id, name, gicon)});
+            log.debug(`in-memory app ${id} for "${name}" (${gicon.to_string()})`);
         } catch (e) {
-            console.error(`Icon Fix: can't create an app for ${name}: ${e}`);
+            log.error(`can't create an app for ${name}`, e);
         }
         this._virtual.set(key, app);
         return app;
@@ -233,6 +236,8 @@ export class WindowSplitter {
         if (current)
             this._release(win);
 
+        log.debug(`moved window "${win.get_title()}" (${win.get_wm_class()}, pid ${win.get_pid()}) ` +
+            `from ${host.get_id()} to ${app.get_id()}`);
         this._moved.set(win, {app, host});
         this._patchHost(host);
         this._patchTarget(app);
@@ -242,6 +247,7 @@ export class WindowSplitter {
     _release(win) {
         if (!this._moved.has(win))
             return;
+        log.debug(`window "${win.get_title()}" back to its launcher (closed or no longer matched)`);
         this._moved.delete(win);
         this._queueRefresh();
     }
@@ -254,10 +260,9 @@ export class WindowSplitter {
         if (this._patched.has(host))
             return;
         this._patched.set(host, null);
-        const moved = () => [...this._moved.keys()];
         const original = saveOriginals(host);
         patchApp(host, {
-            get_windows: () => original.get_windows().filter(w => !moved().includes(w)),
+            get_windows: () => original.get_windows().filter(w => !this._moved.has(w)),
             get_n_windows: () => host.get_windows().length,
             get_state: () => host.get_n_windows() || original.get_state() !== Shell.AppState.RUNNING
                 ? original.get_state() : Shell.AppState.STOPPED,

@@ -87,6 +87,20 @@ export default class IconFixPreferences extends ExtensionPreferences {
             mirror: bottlesMirror,
         }));
 
+        const troubleshooting = new Adw.PreferencesGroup({
+            title: 'Troubleshooting',
+            description: 'Errors are always written to the system journal. To see them, ' +
+                'and with this on, how each window was matched: ' +
+                'journalctl --user -f | grep \'Icon Fix\'',
+        });
+        general.add(troubleshooting);
+        const debugRow = new Adw.SwitchRow({
+            title: 'Debug logging',
+            subtitle: 'Write how windows are matched and which files are written',
+        });
+        this.getSettings().bind('debug-logging', debugRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        troubleshooting.add(debugRow);
+
         const page = new Adw.PreferencesPage({
             title: 'Support',
             icon_name: 'emblem-favorite-symbolic',

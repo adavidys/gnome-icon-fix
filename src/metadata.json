@@ -4,6 +4,6 @@
   "description": "Shows the proper icon and name for Steam games and other apps that GNOME can't match to their .desktop file, so you no longer have to add StartupWMClass to every game by hand.\n\nWorks with the dock (including Dash to Dock), Alt+Tab and the overview. It matches windows the way KDE does, and knows Steam and Proton (including non-Steam shortcuts), Heroic, Lutris, Bottles, Wine, Snap and AppImage: by app ID, Wine prefix and .exe, window class, program, install folder and window title. Games started from Flatpak launchers (Steam, Heroic, Lutris, Bottles) get their own icon instead of the launcher's, and Windows games nobody made an icon for use the one inside their .exe. Your .desktop files are never modified.\n\nOptional: add games from the Flatpak versions of Steam and Bottles to the app grid and search (off by default, see preferences).",
   "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
   "url": "https://github.com/adavidys/gnome-icon-fix",
-  "version-name": "1.5",
+  "version-name": "1.6",
   "settings-schema": "org.gnome.shell.extensions.icon-fix"
 }

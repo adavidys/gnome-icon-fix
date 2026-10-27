@@ -9,6 +9,7 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
+import * as log from '../lib/log.js';
 import {listDir, readText} from '../lib/util.js';
 
 export const MARKER = 'X-IconFix-Generated';
@@ -45,6 +46,11 @@ export class ShortcutMirror {
         return new Map();
     }
 
+    // Whether a change to this file in a watched folder can matter.
+    _relevant(_dir, _file) {
+        return true;
+    }
+
     start() {
         this.sync();
     }
@@ -59,7 +65,18 @@ export class ShortcutMirror {
     }
 
     sync() {
-        const wanted = this._wanted();
+        const start = Date.now();
+        let wanted;
+        try {
+            wanted = this._wanted();
+        } catch (e) {
+            // Keep what's there rather than delete it over a read error.
+            log.error(`${this._prefix}* shortcuts`, e);
+            this._updateWatches();
+            return;
+        }
+        const written = [];
+        const removed = [];
 
         GLib.mkdir_with_parents(this._target, 0o755);
         for (const [name, data] of wanted) {
@@ -68,23 +85,35 @@ export class ShortcutMirror {
             if (current === data)
                 continue;
             // Never overwrite a same-named file we didn't create.
-            if (current !== null && !isGenerated(current))
+            if (current !== null && !isGenerated(current)) {
+                log.warn(`not writing ${path}: a file Icon Fix didn't create is there`);
                 continue;
-            GLib.file_set_contents(path, data);
+            }
+            try {
+                GLib.file_set_contents(path, data);
+                written.push(name);
+            } catch (e) {
+                log.warn(`can't write ${path}: ${e}`);
+            }
         }
 
         // Game uninstalled: drop its shortcut, and icons nothing uses anymore.
         for (const file of generatedFiles(this._prefix, this._iconDir)) {
-            if (file.kind === 'shortcut' && !wanted.has(GLib.path_get_basename(file.path)))
-                GLib.unlink(file.path);
+            const name = GLib.path_get_basename(file.path);
+            if (file.kind === 'shortcut' && !wanted.has(name) && GLib.unlink(file.path) === 0)
+                removed.push(name);
         }
         const used = [...wanted.values()].join('\n');
         for (const name of listDir(this._iconDir)) {
             const path = GLib.build_filenamev([this._iconDir, name]);
-            if (!used.includes(`Icon=${path}\n`))
-                GLib.unlink(path);
+            if (!used.includes(`Icon=${path}\n`) && GLib.unlink(path) === 0)
+                removed.push(name);
         }
 
+        if (written.length || removed.length) {
+            log.debug(`${this._prefix}* shortcuts: ${wanted.size} wanted, wrote [${written.join(', ')}], ` +
+                `removed [${removed.join(', ')}] (${Date.now() - start} ms)`);
+        }
         this._updateWatches();
     }
 
@@ -117,13 +146,21 @@ export class ShortcutMirror {
             return;
         }
 
-        const monitor = dir.monitor_directory(Gio.FileMonitorFlags.NONE, null);
+        let monitor;
+        try {
+            monitor = dir.monitor_directory(Gio.FileMonitorFlags.NONE, null);
+        } catch (e) {
+            log.warn(`can't watch ${path}: ${e}`);
+            return;
+        }
         monitor.connect('changed', (_monitor, file, _other, event) => {
-            this._queueSync();
             // The launcher was uninstalled: wait for it to come back.
             if (event === Gio.FileMonitorEvent.DELETED && file.equal(dir)) {
                 this._unwatch(path);
                 this._watch(path);
+                this._queueSync();
+            } else if (this._relevant(path, file)) {
+                this._queueSync();
             }
         });
         this._monitors.set(path, monitor);

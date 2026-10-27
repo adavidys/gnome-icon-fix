@@ -13,6 +13,7 @@ import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extension
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {AppIndex, parseExec, tryCall} from './lib/appindex.js';
+import * as log from './lib/log.js';
 import {matchTitle, matchWindow} from './lib/matcher.js';
 import {readProcess} from './lib/process.js';
 import {findSandboxedIcon} from './lib/util.js';
@@ -20,6 +21,10 @@ import {FlatpakBottlesMirror} from './mirror/bottles-flatpak.js';
 import {FlatpakSteamMirror} from './mirror/steam-flatpak.js';
 import {createSources, envKeys} from './sources/registry.js';
 import {WindowSplitter} from './split.js';
+
+// installed-changed comes in bursts (Steam installing a game rewrites its
+// shortcut several times): rebuild once they settle.
+const REINDEX_DELAY_MS = 300;
 
 // setting -> the mirror it switches on
 const MIRRORS = [
@@ -29,6 +34,11 @@ const MIRRORS = [
 
 export default class IconFixExtension extends Extension {
     enable() {
+        this._settings = this.getSettings();
+        log.setDebug(this._settings.get_boolean('debug-logging'));
+        this._settings.connectObject('changed::debug-logging',
+            () => log.setDebug(this._settings.get_boolean('debug-logging')), this);
+
         this._appSystem = Shell.AppSystem.get_default();
         this._tracker = Shell.WindowTracker.get_default();
         this._iconTheme = new St.IconTheme();
@@ -42,22 +52,16 @@ export default class IconFixExtension extends Extension {
         this._windows = new Set();
         this._pendingNotify = new Set();
         this._notifyId = 0;
+        this._reindexId = 0;
 
         this._buildIndex();
-        this._appSystem.connectObject('installed-changed', () => {
-            this._iconTheme = new St.IconTheme();
-            this._buildIndex();
-            this._cache = new WeakMap();
-            this._splitter.recheckAll();
-            this._refreshRunning();
-        }, this);
+        this._appSystem.connectObject('installed-changed', () => this._queueReindex(), this);
 
         global.display.connectObject('window-created',
             (_display, win) => this._watchWindow(win), this);
         for (const actor of global.get_window_actors())
             this._watchWindow(actor.meta_window);
 
-        this._settings = this.getSettings();
         // Optional shortcut mirrors, each behind its own setting.
         this._mirrors = new Map();
         for (const [key, Mirror] of MIRRORS) {
@@ -92,6 +96,10 @@ export default class IconFixExtension extends Extension {
             GLib.source_remove(this._notifyId);
             this._notifyId = 0;
         }
+        if (this._reindexId) {
+            GLib.source_remove(this._reindexId);
+            this._reindexId = 0;
+        }
         this._pendingNotify.clear();
 
         // Let docks and switchers go back to the stock icons.
@@ -107,16 +115,35 @@ export default class IconFixExtension extends Extension {
         this._index = null;
     }
 
+    // A mirror that fails must not take the rest of the extension down.
     _syncMirror(key, Mirror, toggled) {
         const enabled = this._settings.get_boolean(key);
-        if (enabled && !this._mirrors.has(key)) {
-            this._mirrors.set(key, new Mirror());
-        } else if (!enabled) {
-            this._mirrors.get(key)?.destroy();
-            this._mirrors.delete(key);
-            if (toggled)
-                Mirror.removeAll();
+        try {
+            if (enabled && !this._mirrors.has(key)) {
+                this._mirrors.set(key, new Mirror());
+            } else if (!enabled) {
+                this._mirrors.get(key)?.destroy();
+                this._mirrors.delete(key);
+                if (toggled)
+                    Mirror.removeAll();
+            }
+        } catch (e) {
+            log.error(`${key}`, e);
         }
+    }
+
+    _queueReindex() {
+        if (this._reindexId)
+            GLib.source_remove(this._reindexId);
+        this._reindexId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, REINDEX_DELAY_MS, () => {
+            this._reindexId = 0;
+            this._iconTheme = new St.IconTheme();
+            this._buildIndex();
+            this._cache = new WeakMap();
+            this._splitter.recheckAll();
+            this._refreshRunning();
+            return GLib.SOURCE_REMOVE;
+        });
     }
 
     _buildIndex() {
@@ -134,7 +161,7 @@ export default class IconFixExtension extends Extension {
                 path: info.get_string('Path'),
             });
         }
-        this._index = new AppIndex(entries, this._sources);
+        this._index = log.timed(`indexed ${entries.length} apps`, () => new AppIndex(entries, this._sources));
     }
 
     _patch() {
@@ -142,10 +169,12 @@ export default class IconFixExtension extends Extension {
         const ext = this;
         this._injections = new InjectionManager();
 
+        // A matched entry goes through these patched methods too: its own
+        // icon may need replacing (see _entryIcon()).
         this._injections.overrideMethod(proto, 'create_icon_texture', original => function (size) {
             const found = ext._resolve(this);
             if (found?.app)
-                return original.call(found.app, size);
+                return found.app.create_icon_texture(size);
             if (found?.gicon) {
                 return new St.Icon({
                     gicon: found.gicon,
@@ -159,7 +188,7 @@ export default class IconFixExtension extends Extension {
         this._injections.overrideMethod(proto, 'get_icon', original => function () {
             const found = ext._resolve(this);
             if (found?.app)
-                return original.call(found.app);
+                return found.app.get_icon();
             return found?.gicon ?? original.call(this);
         });
 
@@ -213,6 +242,7 @@ export default class IconFixExtension extends Extension {
                 primary: this._realize(primary),
                 fallback: this._fallback(fallbacks),
             };
+            log.debug(`window "${title}" (${win.get_wm_class()}, pid ${pid}): ${describe(found)}`);
         }
 
         const result = found.primary ?? this._realize(matchTitle(this._index, title)) ?? found.fallback;
@@ -239,6 +269,8 @@ export default class IconFixExtension extends Extension {
             path ??= this._programIcon(info);
         }
         const result = path ? {gicon: new Gio.FileIcon({file: Gio.File.new_for_path(path)})} : null;
+        if (result)
+            log.debug(`${app.get_id()}: its icon ${icon?.to_string() ?? '(none)'} can't be shown, using ${path}`);
         this._cache.set(app, {result});
         return result;
     }
@@ -315,6 +347,8 @@ export default class IconFixExtension extends Extension {
             launcherSandbox: win.get_sandboxed_app_id(),
             proc: this._procInfo(win.get_pid()),
         });
+        log.debug(`launcher window "${win.get_title()}" (${win.get_wm_class()}, ${win.get_sandboxed_app_id()}): ` +
+            `${primary ? `entry ${primary.id}` : `no entry, fallbacks ${JSON.stringify(fallbacks)}`}`);
         if (primary)
             return this._appSystem.lookup_app(primary.id);
 
@@ -390,4 +424,13 @@ export default class IconFixExtension extends Extension {
             return GLib.SOURCE_REMOVE;
         });
     }
+}
+
+// For the debug log: what a window was matched to.
+function describe({primary, fallback}) {
+    if (primary)
+        return `entry ${primary.tag}`;
+    if (fallback)
+        return `no entry, showing "${fallback.name}" with ${fallback.gicon?.to_string() ?? 'no icon'}`;
+    return 'nothing found, left as is';
 }

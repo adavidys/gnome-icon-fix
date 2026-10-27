@@ -5,6 +5,7 @@
 
 import GLib from 'gi://GLib';
 
+import * as log from './log.js';
 import {programFromArgv} from './process.js';
 import {canonical, exeStem, isSpecificDir, normalize, pathKey, selfAndParents, stripExt} from './util.js';
 
@@ -14,7 +15,7 @@ export function tryCall(source, method, ...args) {
     try {
         return source[method]?.(...args) ?? null;
     } catch (e) {
-        console.error(`Icon Fix: ${source.name}.${method}: ${e}`);
+        log.error(`${source.name}.${method}`, e);
         return null;
     }
 }

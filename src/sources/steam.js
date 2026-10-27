@@ -10,6 +10,7 @@
 import GLib from 'gi://GLib';
 
 import {parseBinaryVdf, parseVdf} from '../lib/formats.js';
+import * as log from '../lib/log.js';
 import {guessPaths} from '../lib/matcher.js';
 import {exeInfo} from '../lib/peicon.js';
 import {
@@ -35,14 +36,16 @@ function steamRoots() {
 // userdata/<user>/config/shortcuts.vdf. id is the 32-bit app id their
 // windows are classed with (the upper half of the 64-bit game id).
 export function readShortcuts(path) {
-    let bytes;
+    let vdf;
     try {
-        bytes = GLib.file_get_contents(path)[1];
-    } catch {
+        vdf = parseBinaryVdf(GLib.file_get_contents(path)[1]);
+    } catch (e) {
+        if (!(e instanceof GLib.Error))
+            log.warn(`can't read ${path}: ${e}`);
         return [];
     }
     const unquote = str => typeof str === 'string' ? str.replace(/^"(.*)"$/, '$1') || null : null;
-    return Object.values(parseBinaryVdf(bytes).shortcuts ?? {})
+    return Object.values(vdf.shortcuts ?? {})
         .filter(s => typeof s?.appid === 'number')
         .map(s => ({
             id: String(s.appid >>> 0),

@@ -7,6 +7,7 @@ import GdkPixbuf from 'gi://GdkPixbuf';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
+import * as log from './log.js';
 import {fileStamp} from './util.js';
 
 const RT_ICON = 3;
@@ -15,8 +16,7 @@ const RT_VERSION = 16;
 
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47];
 
-// Random access to a file without reading all of it (games ship
-// executables of hundreds of megabytes).
+// Random access to a file without reading all of it.
 class Reader {
     constructor(path) {
         this._stream = Gio.File.new_for_path(path).read(null);
@@ -35,8 +35,88 @@ class Reader {
     }
 }
 
-// The resource section as {view, rva}: the whole section is small next to
-// the program, and its offsets are relative to its start.
+// Limits against broken or hostile files: nothing here may make the Shell
+// read, allocate or loop without bound.
+const MAX_ENTRIES = 4096;
+// type -> name -> language
+const MAX_DEPTH = 3;
+const MAX_GROUP_BYTES = 64 << 10;
+const MAX_ICON_BYTES = 4 << 20;
+const MAX_VERSION_BYTES = 256 << 10;
+const MAX_ICON_SIDE = 1024;
+
+// A program's resource section, read piece by piece: installers keep their
+// whole payload in it (hundreds of megabytes), and only a few hundred bytes
+// of tables plus one icon image are needed. Offsets are relative to the
+// section's start; data entries point at RVAs.
+class Resources {
+    constructor(reader, start, size, rva) {
+        this._reader = reader;
+        this._start = start;
+        this._size = size;
+        this._rva = rva;
+    }
+
+    _bytes(offset, length) {
+        if (offset < 0 || length < 0 || offset + length > this._size)
+            throw new RangeError('outside the resource section');
+        return this._reader.bytes(this._start + offset, length);
+    }
+
+    // Entries of one resource directory: [{id, offset, isDir}] (named
+    // entries get id null).
+    _entries(offset) {
+        const head = this._bytes(offset, 16);
+        const count = head.getUint16(12, true) + head.getUint16(14, true);
+        if (count > MAX_ENTRIES)
+            throw new RangeError('too many resource entries');
+        const table = count ? this._bytes(offset + 16, count * 8) : null;
+        const list = [];
+        for (let i = 0; i < count; i++) {
+            const name = table.getUint32(i * 8, true);
+            const target = table.getUint32(i * 8 + 4, true);
+            list.push({
+                id: name & 0x80000000 ? null : name,
+                offset: target & 0x7fffffff,
+                isDir: !!(target & 0x80000000),
+            });
+        }
+        return list;
+    }
+
+    // Every resource of a type, first language only, not read yet:
+    // [{id, offset, size}].
+    list(type) {
+        const typeEntry = this._entries(0).find(e => e.id === type && e.isDir);
+        if (!typeEntry)
+            return [];
+        const found = [];
+        for (const item of this._entries(typeEntry.offset)) {
+            let leaf = item;
+            // A directory pointing back at itself must not hang the Shell.
+            for (let depth = 2; leaf?.isDir; depth++)
+                leaf = depth < MAX_DEPTH ? this._entries(leaf.offset)[0] : null;
+            if (!leaf)
+                continue;
+            const data = this._bytes(leaf.offset, 8);
+            found.push({
+                id: item.id,
+                offset: data.getUint32(0, true) - this._rva,
+                size: data.getUint32(4, true),
+            });
+        }
+        return found;
+    }
+
+    // A resource's data, or null if it's missing or larger than max.
+    read(item, max) {
+        if (!item || item.size > max)
+            return null;
+        const view = this._bytes(item.offset, item.size);
+        return new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+    }
+}
+
 function resourceSection(reader) {
     const dos = reader.bytes(0, 64);
     if (dos.getUint16(0, true) !== 0x5a4d) // MZ
@@ -62,56 +142,10 @@ function resourceSection(reader) {
         const virtualAddress = table.getUint32(i * 40 + 12, true);
         const rawSize = table.getUint32(i * 40 + 16, true);
         const rawPointer = table.getUint32(i * 40 + 20, true);
-        if (rva >= virtualAddress && rva < virtualAddress + Math.max(virtualSize, rawSize)) {
-            const start = rawPointer + (rva - virtualAddress);
-            const size = Math.min(rawSize - (rva - virtualAddress), 64 << 20);
-            return {view: reader.bytes(start, size), rva};
-        }
+        if (rva >= virtualAddress && rva < virtualAddress + Math.max(virtualSize, rawSize))
+            return new Resources(reader, rawPointer + (rva - virtualAddress), rawSize - (rva - virtualAddress), rva);
     }
     return null;
-}
-
-// Entries of one resource directory: [{id, offset, isDir}] (named entries
-// get id null).
-function entries(view, offset) {
-    const named = view.getUint16(offset + 12, true);
-    const ids = view.getUint16(offset + 14, true);
-    const list = [];
-    for (let i = 0; i < named + ids; i++) {
-        const name = view.getUint32(offset + 16 + i * 8, true);
-        const target = view.getUint32(offset + 16 + i * 8 + 4, true);
-        list.push({
-            id: name & 0x80000000 ? null : name,
-            offset: target & 0x7fffffff,
-            isDir: !!(target & 0x80000000),
-        });
-    }
-    return list;
-}
-
-// Every resource of a type: [{id, data: Uint8Array}], first language only.
-function resources({view, rva}, type) {
-    const typeEntry = entries(view, 0).find(e => e.id === type && e.isDir);
-    if (!typeEntry)
-        return [];
-    const found = [];
-    for (const item of entries(view, typeEntry.offset)) {
-        let leaf = item;
-        while (leaf?.isDir)
-            leaf = entries(view, leaf.offset)[0];
-        if (!leaf)
-            continue;
-        const dataRva = view.getUint32(leaf.offset, true);
-        const size = view.getUint32(leaf.offset + 4, true);
-        const start = dataRva - rva;
-        if (start < 0 || start + size > view.byteLength)
-            continue;
-        found.push({
-            id: item.id,
-            data: new Uint8Array(view.buffer, view.byteOffset + start, size),
-        });
-    }
-    return found;
 }
 
 // Decodes an icon image: PNG as is, or a BMP DIB (32, 24, 8, 4 or 1 bits
@@ -119,6 +153,11 @@ function resources({view, rva}, type) {
 function decodeIcon(data) {
     if (PNG_MAGIC.every((b, i) => data[i] === b)) {
         const loader = new GdkPixbuf.PixbufLoader();
+        // A tiny PNG may claim to be enormous; don't decode it at that size.
+        loader.connect('size-prepared', (_loader, w, h) => {
+            if (w > MAX_ICON_SIDE || h > MAX_ICON_SIDE)
+                loader.set_size(Math.min(w, 256), Math.min(h, 256));
+        });
         loader.write_bytes(new GLib.Bytes(data));
         loader.close();
         return loader.get_pixbuf();
@@ -129,7 +168,8 @@ function decodeIcon(data) {
     const width = dib.getInt32(4, true);
     const height = dib.getInt32(8, true) / 2;
     const bpp = dib.getUint16(14, true);
-    if (width <= 0 || height <= 0 || ![32, 24, 8, 4, 1].includes(bpp))
+    if (width <= 0 || height <= 0 || width > MAX_ICON_SIDE || height > MAX_ICON_SIDE ||
+        ![32, 24, 8, 4, 1].includes(bpp))
         return null;
     const colors = bpp <= 8 ? dib.getUint32(32, true) || 1 << bpp : 0;
     const palette = headerSize;
@@ -175,13 +215,14 @@ function decodeIcon(data) {
         GdkPixbuf.Colorspace.RGB, true, 8, width, height, width * 4);
 }
 
-// The program's own icon (its first icon group), largest image first.
-function bestIcon(section) {
-    const group = resources(section, RT_GROUP_ICON)[0];
+// The program's own icon (its first icon group), largest image first. Only
+// the images tried are read.
+function bestIcon(resources) {
+    const group = resources.read(resources.list(RT_GROUP_ICON)[0], MAX_GROUP_BYTES);
     if (!group)
         return null;
-    const icons = new Map(resources(section, RT_ICON).map(r => [r.id, r.data]));
-    const dir = new DataView(group.data.buffer, group.data.byteOffset, group.data.byteLength);
+    const icons = new Map(resources.list(RT_ICON).map(r => [r.id, r]));
+    const dir = new DataView(group.buffer, group.byteOffset, group.byteLength);
     const count = dir.getUint16(4, true);
     const candidates = [];
     for (let i = 0; i < count && 6 + i * 14 + 14 <= dir.byteLength; i++) {
@@ -189,15 +230,14 @@ function bestIcon(section) {
         candidates.push({
             size: dir.getUint8(e) || 256,
             bpp: dir.getUint16(e + 6, true),
-            data: icons.get(dir.getUint16(e + 12, true)),
+            image: icons.get(dir.getUint16(e + 12, true)),
         });
     }
     candidates.sort((a, b) => b.size - a.size || b.bpp - a.bpp);
     for (const c of candidates) {
-        if (!c.data)
-            continue;
         try {
-            const pixbuf = decodeIcon(c.data);
+            const data = resources.read(c.image, MAX_ICON_BYTES);
+            const pixbuf = data && decodeIcon(data);
             if (pixbuf)
                 return pixbuf;
         } catch {}
@@ -205,15 +245,25 @@ function bestIcon(section) {
     return null;
 }
 
-// A string from the version info, e.g. ProductName. The String blocks hold
-// a UTF-16 key, padding to 32 bits, then the UTF-16 value.
-function versionString(section, key) {
-    const version = resources(section, RT_VERSION)[0]?.data;
+// The first of these strings the version info has (ProductName...). The
+// String blocks hold a UTF-16 key, padding to 32 bits, then the value.
+function versionString(resources, keys) {
+    const version = resources.read(resources.list(RT_VERSION)[0], MAX_VERSION_BYTES);
     if (!version)
         return null;
+    for (const key of keys) {
+        const value = findString(version, key);
+        if (value)
+            return value;
+    }
+    return null;
+}
+
+function findString(version, key) {
     const needle = [...`${key}\0`].flatMap(c => [c.charCodeAt(0), 0]);
-    for (let i = 0; i + needle.length <= version.length; i += 2) {
-        if (!needle.every((b, j) => version[i + j] === b))
+    // A String block starts with 3 words (lengths, type) before its key.
+    for (let i = 6; i + needle.length <= version.length; i += 2) {
+        if (version[i] !== needle[0] || !needle.every((b, j) => version[i + j] === b))
             continue;
         const valueLength = version[i - 4] | version[i - 3] << 8;
         const start = (i + needle.length + 3) & ~3;
@@ -245,12 +295,12 @@ export function exeInfo(path, dir = cacheDir()) {
 
     let info = null;
     let reader = null;
+    const start = Date.now();
     try {
         reader = new Reader(path);
         const section = resourceSection(reader);
         if (section) {
-            const name = versionString(section, 'ProductName') ??
-                versionString(section, 'FileDescription');
+            const name = versionString(section, ['ProductName', 'FileDescription']);
             const sum = GLib.compute_checksum_for_string(GLib.ChecksumType.SHA1, `${path}\n${stamp}`, -1);
             let icon = GLib.build_filenamev([dir, `${sum}.png`]);
             if (!GLib.file_test(icon, GLib.FileTest.EXISTS)) {
@@ -264,8 +314,9 @@ export function exeInfo(path, dir = cacheDir()) {
             }
             info = {icon, name};
         }
+        log.debug(`${path}: ${info?.icon ? 'icon' : 'no icon'}, name ${JSON.stringify(info?.name ?? null)} (${Date.now() - start} ms)`);
     } catch (e) {
-        console.debug(`Icon Fix: can't read ${path}: ${e}`);
+        log.debug(`can't read ${path} as a Windows program: ${e}`);
     } finally {
         try {
             reader?.close();

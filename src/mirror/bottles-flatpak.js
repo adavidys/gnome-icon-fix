@@ -9,6 +9,7 @@
 import GLib from 'gi://GLib';
 
 import {parseYaml} from '../lib/formats.js';
+import * as log from '../lib/log.js';
 import {exeInfo} from '../lib/peicon.js';
 import {exeStem, exists, listDir, readText} from '../lib/util.js';
 import {bottleFromConfig} from '../sources/bottles.js';
@@ -70,6 +71,12 @@ export class FlatpakBottlesMirror extends ShortcutMirror {
         return [root, ...listDir(root).map(name => GLib.build_filenamev([root, name]))];
     }
 
+    // A running program makes Wine rewrite its bottle's registry files every
+    // few seconds; only bottle.yml and the extracted icons matter.
+    _relevant(dir, file) {
+        return dir === bottlesDir() || /^(bottle\.yml|icons)$/.test(file.get_basename());
+    }
+
     _wanted() {
         const wanted = new Map();
         const root = bottlesDir();
@@ -81,7 +88,8 @@ export class FlatpakBottlesMirror extends ShortcutMirror {
             let bottle;
             try {
                 bottle = {dir, ...bottleFromConfig(parseYaml(text))};
-            } catch {
+            } catch (e) {
+                log.warn(`can't read ${dir}/bottle.yml: ${e}`);
                 continue;
             }
             for (const program of bottle.programs.filter(p => !p.removed)) {

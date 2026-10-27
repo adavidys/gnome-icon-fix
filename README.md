@@ -83,6 +83,14 @@ When nothing else knows a Wine game's icon, Icon Fix reads the one stored in its
 
 The same goes for shortcuts with an empty `Icon=` or one that points nowhere: Icon Fix finds the game the shortcut launches (a `.exe` in `Exec`, or the game behind a Steam, Heroic, Lutris or Bottles shortcut) and shows its icon in the app grid, search and dock. Native Linux programs keep no icon inside them, so this only works for Windows games.
 
+## Troubleshooting
+
+Icon Fix writes errors to the system journal. Turn on **Debug logging** in its preferences to also see how each window was matched, which icons were replaced and what the shortcut options wrote:
+
+```bash
+journalctl --user -f | grep 'Icon Fix'
+```
+
 ## Install
 
 **From GNOME Extensions (recommended):** [extensions.gnome.org/extension/11492/icon-fix](https://extensions.gnome.org/extension/11492/icon-fix/)
@@ -115,6 +123,7 @@ src/
 │   ├── matcher.js      # matching order: sources, class, program, folder, title
 │   ├── process.js      # /proc reading, argv parsing, Wine path translation
 │   ├── formats.js      # YAML (Bottles, Lutris) and VDF (Steam) readers
+│   ├── log.js          # journal messages, details behind the debug setting
 │   ├── peicon.js       # icon and product name from a Windows .exe
 │   └── util.js         # paths, file caches
 ├── sources/            # one file per launcher, see registry.js for the interface

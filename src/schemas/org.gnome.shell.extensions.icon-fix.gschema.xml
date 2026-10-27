@@ -11,5 +11,10 @@
       <summary>Add programs from Flatpak Bottles to the app grid and search</summary>
       <description>Writes a shortcut for every program of every bottle of Bottles from Flathub (com.usebottles.bottles) into ~/.local/share/applications as bottles-flatpak-*.desktop files, since Bottles can't create them from its sandbox. Turning it off removes them again.</description>
     </key>
+    <key name="debug-logging" type="b">
+      <default>false</default>
+      <summary>Write debug details to the system journal</summary>
+      <description>Logs how each window was matched, which icons were replaced, what the shortcut mirrors wrote and how long it took, prefixed "Icon Fix:". Errors are logged either way.</description>
+    </key>
   </schema>
 </schemalist>
