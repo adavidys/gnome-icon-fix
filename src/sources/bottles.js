@@ -46,13 +46,20 @@ export function parseBottlesExec(argv) {
     return out.bottle && (out.program || out.executable) ? out : null;
 }
 
-// bottle.yml -> {name, programs: [{name, stem, path}]}
+// bottle.yml -> {name, programs: [{name, stem, path, removed}]}; removed:
+// hidden in Bottles' program list.
 export function bottleFromConfig(config) {
     const programs = [];
     for (const program of Object.values(config.External_Programs ?? {})) {
         const exe = program?.executable || program?.path;
-        if (program?.name && typeof exe === 'string')
-            programs.push({name: program.name, stem: exeStem(exe), path: canonical(program.path)});
+        if (program?.name && typeof exe === 'string') {
+            programs.push({
+                name: program.name,
+                stem: exeStem(exe),
+                path: canonical(program.path),
+                removed: program.removed === 'true',
+            });
+        }
     }
     return {name: config.Name ?? null, programs};
 }

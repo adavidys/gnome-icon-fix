@@ -53,6 +53,18 @@ Shortcuts made with **Manage → Add desktop shortcut** (Flatpak Steam keeps the
 
 The mirror stays in sync as you install or remove games. Icon Fix only writes and deletes files it generated itself; the preferences list every one of them under **Created files**, with a button to show it in Files. Turning the option off removes them.
 
+### Bottles from Flathub
+
+Flatpak Bottles (`com.usebottles.bottles`) can't add its programs to the app grid: its **Add Desktop Entry** reports success but no file appears, because the sandbox may not write to `~/.local/share/applications`.
+
+Turn on **Show Flatpak Bottles programs** in the extension's preferences (off by default). Icon Fix then writes a shortcut for every program of every bottle, `~/.local/share/applications/bottles-flatpak-<bottle>-<program>.desktop`:
+
+- launches with `flatpak run --command=bottles-cli com.usebottles.bottles run -p <program> -b <bottle>`, like Bottles' own shortcuts;
+- uses the icon Bottles extracted from the program, or else the one inside its `.exe`;
+- leaves out programs hidden in Bottles.
+
+Shortcuts follow your bottles as you add and remove programs, and turning the option off removes them. Each option lists the files it created in the preferences, Steam's and Bottles' separately.
+
 ### Running games from Flatpak launchers
 
 GNOME assigns every window from a Flatpak sandbox to that sandbox's app, whatever `StartupWMClass` says. So a game started by Steam, Heroic, Lutris or Bottles from Flathub shows up as the launcher itself in the dock and Alt+Tab.
@@ -114,8 +126,10 @@ src/
 │   ├── wine.js
 │   ├── packaging.js    # Snap, AppImage
 │   └── exe.js          # last resort: the .exe's own icon
-├── mirror/
-│   └── steam-flatpak.js  # optional Flatpak Steam shortcut mirror
+├── mirror/               # optional shortcuts, each behind its own setting
+│   ├── base.js           # watching, writing and cleaning up generated files
+│   ├── steam-flatpak.js  # Flatpak Steam's sandboxed shortcuts
+│   └── bottles-flatpak.js  # Flatpak Bottles' programs
 ├── metadata.json
 ├── schemas/            # GSettings schema
 └── qr/                 # donation QR codes

@@ -7,19 +7,14 @@
 // shortcuts.vdf (or the .exe). Only files we generated (prefix + marker key)
 // are ever written or removed.
 
-import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
 import {exists, findHicolorIcon, listDir, readText} from '../lib/util.js';
 import {readShortcuts, shortcutFiles, shortcutLook} from '../sources/steam.js';
+import {GROUP, MARKER, ShortcutMirror, generatedFiles as filesOf, removeGenerated} from './base.js';
 
 const STEAM_APP = 'com.valvesoftware.Steam';
 const PREFIX = 'steam-flatpak-';
-const MARKER = 'X-IconFix-Generated';
-const GROUP = 'Desktop Entry';
-const SYNC_DELAY_MS = 1000;
-// How often to look for the shortcuts dir while Steam isn't installed yet.
-const WAIT_SECONDS = 30;
 const encoder = new TextEncoder();
 
 function steamShare() {
@@ -27,7 +22,7 @@ function steamShare() {
 }
 
 // Icons taken from non-Steam games' .exe files, for our shortcuts to use.
-function iconDir() {
+export function iconDir() {
     return GLib.build_filenamev([GLib.get_user_data_dir(), 'icon-fix', 'icons']);
 }
 
@@ -88,81 +83,22 @@ export function convertShortcut(share, data, nonSteam = () => null) {
     return {gameId, data: kf.to_data()[0]};
 }
 
-export class FlatpakSteamMirror {
+export class FlatpakSteamMirror extends ShortcutMirror {
     constructor() {
+        super(PREFIX, iconDir());
         this._share = steamShare();
         this._sources = [
             GLib.build_filenamev([this._share, 'applications']),
             GLib.build_filenamev([GLib.get_home_dir(), '.var', 'app', STEAM_APP, 'Desktop']),
         ];
-        this._target = GLib.build_filenamev([GLib.get_user_data_dir(), 'applications']);
-        this._syncId = 0;
-        // dir -> wait timer id or file monitor
-        this._waits = new Map();
-        this._monitors = new Map();
-
-        for (const dir of this._sources)
-            this._watch(dir);
-        this.sync();
+        this.start();
     }
 
-    destroy() {
-        for (const dir of this._sources)
-            this._unwatch(dir);
-        if (this._syncId) {
-            GLib.source_remove(this._syncId);
-            this._syncId = 0;
-        }
+    _watchedDirs() {
+        return this._sources;
     }
 
-    // A monitor on a missing dir never fires, so until Steam has created it
-    // just check for it now and then.
-    _watch(path) {
-        const dir = Gio.File.new_for_path(path);
-        if (!dir.query_exists(null)) {
-            this._waits.set(path, GLib.timeout_add_seconds(GLib.PRIORITY_LOW, WAIT_SECONDS, () => {
-                if (!dir.query_exists(null))
-                    return GLib.SOURCE_CONTINUE;
-                this._waits.delete(path);
-                this._watch(path);
-                this._queueSync();
-                return GLib.SOURCE_REMOVE;
-            }));
-            return;
-        }
-
-        const monitor = dir.monitor_directory(Gio.FileMonitorFlags.NONE, null);
-        monitor.connect('changed', (_monitor, file, _other, event) => {
-            this._queueSync();
-            // Steam was uninstalled: wait for it to come back.
-            if (event === Gio.FileMonitorEvent.DELETED && file.equal(dir)) {
-                this._unwatch(path);
-                this._watch(path);
-            }
-        });
-        this._monitors.set(path, monitor);
-    }
-
-    _unwatch(path) {
-        this._monitors.get(path)?.cancel();
-        this._monitors.delete(path);
-        if (this._waits.has(path))
-            GLib.source_remove(this._waits.get(path));
-        this._waits.delete(path);
-    }
-
-    // Steam rewrites shortcuts in bursts while installing; settle first.
-    _queueSync() {
-        if (this._syncId)
-            GLib.source_remove(this._syncId);
-        this._syncId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, SYNC_DELAY_MS, () => {
-            this._syncId = 0;
-            this.sync();
-            return GLib.SOURCE_REMOVE;
-        });
-    }
-
-    sync() {
+    _wanted() {
         let shortcuts = null;
         const nonSteam = id => {
             shortcuts ??= shortcutFiles(GLib.build_filenamev([this._share, 'Steam'])).flatMap(readShortcuts);
@@ -180,73 +116,15 @@ export class FlatpakSteamMirror {
                     wanted.set(`${PREFIX}${out.gameId}.desktop`, out.data);
             }
         }
-
-        GLib.mkdir_with_parents(this._target, 0o755);
-        for (const [name, data] of wanted) {
-            const path = GLib.build_filenamev([this._target, name]);
-            const current = readText(path);
-            if (current === data)
-                continue;
-            // Never overwrite a same-named file we didn't create.
-            if (current !== null && !isGenerated(current))
-                continue;
-            GLib.file_set_contents(path, data);
-        }
-
-        // Game uninstalled: drop its mirror, and icons nothing uses anymore.
-        for (const name of listDir(this._target)) {
-            if (!name.startsWith(PREFIX) || !name.endsWith('.desktop') || wanted.has(name))
-                continue;
-            removeIfGenerated(GLib.build_filenamev([this._target, name]));
-        }
-        const used = [...wanted.values()].join('\n');
-        for (const name of listDir(iconDir())) {
-            const path = GLib.build_filenamev([iconDir(), name]);
-            if (!used.includes(`Icon=${path}\n`))
-                GLib.unlink(path);
-        }
+        return wanted;
     }
 
-    // Used when the setting is switched off.
     static removeAll() {
-        for (const file of generatedFiles())
-            GLib.unlink(file.path);
+        removeGenerated(PREFIX, iconDir());
     }
 }
 
-// Every file the mirror made (shortcuts with our marker, and the icons it
-// took from .exe files), for the preferences window and removeAll().
-// [{path, name, icon, kind: 'shortcut' | 'icon'}]; icon: path or icon name.
+// The files this mirror made, for the preferences window.
 export function generatedFiles() {
-    const files = [];
-    const target = GLib.build_filenamev([GLib.get_user_data_dir(), 'applications']);
-    for (const name of listDir(target)) {
-        if (!name.startsWith(PREFIX) || !name.endsWith('.desktop'))
-            continue;
-        const path = GLib.build_filenamev([target, name]);
-        const data = readText(path);
-        if (data === null || !isGenerated(data))
-            continue;
-        files.push({
-            path,
-            name: data.match(/^Name=(.*)$/m)?.[1] ?? name,
-            icon: data.match(/^Icon=(.+)$/m)?.[1] ?? null,
-            kind: 'shortcut',
-        });
-    }
-    for (const name of listDir(iconDir())) {
-        const path = GLib.build_filenamev([iconDir(), name]);
-        files.push({path, name, icon: path, kind: 'icon'});
-    }
-    return files;
-}
-
-function isGenerated(data) {
-    return new RegExp(`^${MARKER}=true$`, 'm').test(data);
-}
-
-function removeIfGenerated(path) {
-    const data = readText(path);
-    if (data !== null && isGenerated(data))
-        GLib.unlink(path);
+    return filesOf(PREFIX, iconDir());
 }

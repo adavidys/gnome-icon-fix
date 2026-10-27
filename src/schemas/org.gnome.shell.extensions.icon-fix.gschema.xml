@@ -6,5 +6,10 @@
       <summary>Add Flatpak Steam games to the app grid and search</summary>
       <description>Mirrors the game shortcuts of Steam from Flathub (com.valvesoftware.Steam) into ~/.local/share/applications as steam-flatpak-*.desktop files with a working Exec line. Turning it off removes them again.</description>
     </key>
+    <key name="flatpak-bottles" type="b">
+      <default>false</default>
+      <summary>Add programs from Flatpak Bottles to the app grid and search</summary>
+      <description>Writes a shortcut for every program of every bottle of Bottles from Flathub (com.usebottles.bottles) into ~/.local/share/applications as bottles-flatpak-*.desktop files, since Bottles can't create them from its sandbox. Turning it off removes them again.</description>
+    </key>
   </schema>
 </schemalist>

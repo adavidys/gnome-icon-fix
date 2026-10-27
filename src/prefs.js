@@ -1,6 +1,6 @@
-// Preferences window: a General page with the optional Flatpak Steam
-// support and the files it created, and a support page with a coin
-// switcher, QR code and copyable address.
+// Preferences window: a General page with the optional Flatpak Steam and
+// Flatpak Bottles shortcuts and the files each created, and a support page
+// with a coin switcher, QR code and copyable address.
 
 import Adw from 'gi://Adw';
 import Gdk from 'gi://Gdk';
@@ -10,7 +10,8 @@ import Gtk from 'gi://Gtk';
 
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
-import {generatedFiles} from './mirror/steam-flatpak.js';
+import * as bottlesMirror from './mirror/bottles-flatpak.js';
+import * as steamMirror from './mirror/steam-flatpak.js';
 
 // QR codes in qr/ are generated from these addresses (qrencode -l M -m 2).
 const COINS = [
@@ -65,23 +66,26 @@ export default class IconFixPreferences extends ExtensionPreferences {
         });
         window.add(general);
 
-        const flatpakGroup = new Adw.PreferencesGroup({
+        general.add(this._mirrorGroup(window, {
             title: 'Flatpak Steam',
             description: 'Steam from Flathub keeps its game shortcuts inside its sandbox, ' +
                 'so GNOME can\'t find them. This copies them to ' +
                 '~/.local/share/applications as steam-flatpak-*.desktop files ' +
                 'that launch through Flatpak. Your own .desktop files are never touched.',
-        });
-        general.add(flatpakGroup);
-
-        const flatpakRow = new Adw.SwitchRow({
-            title: 'Show Flatpak Steam games',
-            subtitle: 'In the app grid and search, with their icons',
-        });
-        this.getSettings().bind('flatpak-steam', flatpakRow, 'active',
-            Gio.SettingsBindFlags.DEFAULT);
-        flatpakGroup.add(flatpakRow);
-        flatpakGroup.add(this._createdFilesRow(window));
+            key: 'flatpak-steam',
+            switchTitle: 'Show Flatpak Steam games',
+            mirror: steamMirror,
+        }));
+        general.add(this._mirrorGroup(window, {
+            title: 'Flatpak Bottles',
+            description: 'Bottles from Flathub can\'t add its programs to the app grid ' +
+                'from its sandbox. This creates a shortcut for each program in your bottles, ' +
+                'as bottles-flatpak-*.desktop files in ~/.local/share/applications. ' +
+                'Your own .desktop files are never touched.',
+            key: 'flatpak-bottles',
+            switchTitle: 'Show Flatpak Bottles programs',
+            mirror: bottlesMirror,
+        }));
 
         const page = new Adw.PreferencesPage({
             title: 'Support',
@@ -161,9 +165,22 @@ export default class IconFixPreferences extends ExtensionPreferences {
         });
     }
 
-    // Every file the Flatpak Steam mirror made, kept up to date while the
-    // window is open.
-    _createdFilesRow(window) {
+    // One optional shortcut mirror: its switch and the files it made.
+    _mirrorGroup(window, {title, description, key, switchTitle, mirror}) {
+        const group = new Adw.PreferencesGroup({title, description});
+        const row = new Adw.SwitchRow({
+            title: switchTitle,
+            subtitle: 'In the app grid and search, with their icons',
+        });
+        this.getSettings().bind(key, row, 'active', Gio.SettingsBindFlags.DEFAULT);
+        group.add(row);
+        group.add(this._createdFilesRow(window, mirror));
+        return group;
+    }
+
+    // Every file one mirror made (and only that mirror), kept up to date
+    // while the window is open.
+    _createdFilesRow(window, mirror) {
         const expander = new Adw.ExpanderRow({
             title: 'Created files',
             subtitle_lines: 1,
@@ -172,7 +189,7 @@ export default class IconFixPreferences extends ExtensionPreferences {
         const refresh = () => {
             for (const row of rows)
                 expander.remove(row);
-            const files = generatedFiles();
+            const files = mirror.generatedFiles();
             rows = files.map(file => this._fileRow(window, file));
             for (const row of rows)
                 expander.add_row(row);
@@ -199,7 +216,7 @@ export default class IconFixPreferences extends ExtensionPreferences {
         };
         const monitors = [
             GLib.build_filenamev([GLib.get_user_data_dir(), 'applications']),
-            GLib.build_filenamev([GLib.get_user_data_dir(), 'icon-fix', 'icons']),
+            mirror.iconDir(),
         ].map(path => {
             try {
                 const monitor = Gio.File.new_for_path(path).monitor_directory(Gio.FileMonitorFlags.NONE, null);
@@ -221,7 +238,7 @@ export default class IconFixPreferences extends ExtensionPreferences {
 
     _fileRow(window, file) {
         const row = new Adw.ActionRow({
-            title: file.kind === 'icon' ? 'Icon taken from a game\'s .exe' : file.name,
+            title: file.kind === 'icon' ? 'Icon taken from a program\'s .exe' : file.name,
             subtitle: file.path,
             subtitle_selectable: true,
             use_markup: false,

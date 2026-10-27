@@ -16,9 +16,16 @@ import {AppIndex, parseExec, tryCall} from './lib/appindex.js';
 import {matchTitle, matchWindow} from './lib/matcher.js';
 import {readProcess} from './lib/process.js';
 import {findSandboxedIcon} from './lib/util.js';
+import {FlatpakBottlesMirror} from './mirror/bottles-flatpak.js';
 import {FlatpakSteamMirror} from './mirror/steam-flatpak.js';
 import {createSources, envKeys} from './sources/registry.js';
 import {WindowSplitter} from './split.js';
+
+// setting -> the mirror it switches on
+const MIRRORS = [
+    ['flatpak-steam', FlatpakSteamMirror],
+    ['flatpak-bottles', FlatpakBottlesMirror],
+];
 
 export default class IconFixExtension extends Extension {
     enable() {
@@ -51,9 +58,12 @@ export default class IconFixExtension extends Extension {
             this._watchWindow(actor.meta_window);
 
         this._settings = this.getSettings();
-        this._settings.connectObject('changed::flatpak-steam',
-            () => this._syncFlatpakSteam(true), this);
-        this._syncFlatpakSteam(false);
+        // Optional shortcut mirrors, each behind its own setting.
+        this._mirrors = new Map();
+        for (const [key, Mirror] of MIRRORS) {
+            this._settings.connectObject(`changed::${key}`, () => this._syncMirror(key, Mirror, true), this);
+            this._syncMirror(key, Mirror, false);
+        }
 
         this._patch();
         this._splitter = new WindowSplitter((win, splitter) => this._launcherGameApp(win, splitter));
@@ -66,8 +76,9 @@ export default class IconFixExtension extends Extension {
         this._unpatch();
 
         // Keep the generated shortcuts: disable() also runs on screen lock.
-        this._flatpakMirror?.destroy();
-        this._flatpakMirror = null;
+        for (const mirror of this._mirrors.values())
+            mirror.destroy();
+        this._mirrors = null;
         this._settings.disconnectObject(this);
         this._settings = null;
 
@@ -96,15 +107,15 @@ export default class IconFixExtension extends Extension {
         this._index = null;
     }
 
-    _syncFlatpakSteam(toggled) {
-        const enabled = this._settings.get_boolean('flatpak-steam');
-        if (enabled && !this._flatpakMirror) {
-            this._flatpakMirror = new FlatpakSteamMirror();
+    _syncMirror(key, Mirror, toggled) {
+        const enabled = this._settings.get_boolean(key);
+        if (enabled && !this._mirrors.has(key)) {
+            this._mirrors.set(key, new Mirror());
         } else if (!enabled) {
-            this._flatpakMirror?.destroy();
-            this._flatpakMirror = null;
+            this._mirrors.get(key)?.destroy();
+            this._mirrors.delete(key);
             if (toggled)
-                FlatpakSteamMirror.removeAll();
+                Mirror.removeAll();
         }
     }
 
