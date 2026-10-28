@@ -53,7 +53,7 @@ function write(record) {
 // The JS stack of whoever called us, without our own frames.
 function callers() {
     return (new Error().stack ?? '').split('\n')
-        .filter(line => line && !line.includes('/icon-trace@'))
+        .filter(line => line && !line.includes(import.meta.url))
         .slice(0, STACK_FRAMES)
         .map(line => line.replace(/^resource:\/\/\/org\/gnome\/shell\//, '')
             .replace(/@resource:\/\/\/org\/gnome\/shell\//, '@')

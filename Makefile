@@ -2,7 +2,7 @@ UUID := icon-fix@adavidys
 ZIP := dist/$(UUID).shell-extension.zip
 SOURCES := $(shell find src -type f ! -name gschemas.compiled) LICENSE
 
-.PHONY: all pack schemas install uninstall clean check
+.PHONY: all pack schemas install uninstall clean check trace trace-install
 
 all: pack
 
@@ -39,3 +39,11 @@ clean:
 # Tests of everything that runs outside GNOME Shell, with code coverage
 check:
 	sh tests/run.sh
+
+# Icon Trace, the debugging extension in tools/icon-trace (not part of Icon Fix)
+trace:
+	@mkdir -p dist
+	gnome-extensions pack tools/icon-trace --force --out-dir=dist
+
+trace-install: trace
+	gnome-extensions install --force dist/icon-trace@adavidys.shell-extension.zip
