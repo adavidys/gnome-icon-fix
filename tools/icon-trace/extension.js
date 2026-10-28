@@ -11,9 +11,11 @@
 // visible who in the Shell (dash, Alt+Tab, overview, an extension) shows
 // what.
 //
-// Output, one JSON object per line: ~/.cache/icon-trace/trace.jsonl (moved
-// to trace.jsonl.old past 20 MB). Write anything to ~/.cache/icon-trace/dump
-// to get a full dump of all windows and running apps.
+// Output, one JSON object per line: ~/.cache/icon-trace/trace.jsonl, for
+// the current GNOME Shell session only (the previous session's is moved to
+// trace.jsonl.old, and so is a log past 20 MB). Write anything to
+// ~/.cache/icon-trace/dump to get a full dump of all windows and running
+// apps. The preferences window shows the log.
 
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
@@ -22,6 +24,7 @@ import Shell from 'gi://Shell';
 import St from 'gi://St';
 
 import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
+import * as Config from 'resource:///org/gnome/shell/misc/config.js';
 
 const DIR = GLib.build_filenamev([GLib.get_user_cache_dir(), 'icon-trace']);
 const LOG = GLib.build_filenamev([DIR, 'trace.jsonl']);
@@ -34,6 +37,24 @@ const STACK_FRAMES = 8;
 const FALLBACK_ICON = 'application-x-executable';
 
 const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+// The Shell process: a new one is a new session. The extension is also
+// disabled and enabled again around a locked screen, which isn't.
+const SHELL_PID = Gio.Credentials.new().get_unix_pid();
+
+// Starts the log of this session, keeping the last session's as .old.
+function startSession() {
+    const file = Gio.File.new_for_path(LOG);
+    let first = null;
+    try {
+        const stream = Gio.DataInputStream.new(file.read(null));
+        first = JSON.parse(decoder.decode(stream.read_line(null)[0] ?? new Uint8Array()) || 'null');
+        stream.close(null);
+    } catch {}
+    if (first && first.shellPid !== SHELL_PID)
+        file.move(Gio.File.new_for_path(`${LOG}.old`), Gio.FileCopyFlags.OVERWRITE, null, null);
+}
 
 function write(record) {
     try {
@@ -234,13 +255,18 @@ export function replayDecision(win, tracker, appSys, seen = new Set()) {
 export default class IconTraceExtension extends Extension {
     enable() {
         GLib.mkdir_with_parents(DIR, 0o755);
+        try {
+            startSession();
+        } catch (e) {
+            console.error(`Icon Trace: can't start the session log: ${e}`);
+        }
         this._tracker = Shell.WindowTracker.get_default();
         this._appSys = Shell.AppSystem.get_default();
         this._theme = new St.IconTheme();
         this._stacks = new Map();
         this._idles = new Set();
         this._windows = new Set();
-        write({kind: 'enabled', shell: Shell.PACKAGE_VERSION ?? null,
+        write({kind: 'enabled', shellPid: SHELL_PID, shell: Config.PACKAGE_VERSION,
             extensions: global.settings.get_strv('enabled-extensions')});
 
         // Who asks the Shell for icons, names and window apps, with stacks.

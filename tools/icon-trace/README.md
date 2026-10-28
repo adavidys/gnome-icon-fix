@@ -27,9 +27,16 @@ When several entries have the same `StartupWMClass`, the one whose id equals the
 
 `shell_app_create_icon_texture()` (`src/shell-app.c`) makes an `StIcon` whose `gicon` is **bound** to the app's `icon` property, read in C from the entry's `Icon=` (or `application-x-executable` for a window-backed app). A JavaScript override of `ShellApp.get_icon()` is therefore not seen by icons the Shell creates; only an override of `create_icon_texture()` is.
 
+## The preferences window
+
+Open it from Extensions (or `gnome-extensions prefs icon-trace@adavidys`). It shows the log of the **current GNOME Shell session** and follows it live:
+
+- **Windows**: every window with the app GNOME gave it. Expand one for the facts GNOME looked at, each step of the decision (✓ decided, ⊘ found but rejected, – nothing found), and where the name and icon come from and what is drawn. *Snapshot now* records every open window again.
+- **Who asks**: every place in the Shell that asked for a window's app, an app's icon or name, grouped by what it asked; expand one for its full JavaScript stack.
+
 ## What it writes
 
-One JSON object per line to `~/.cache/icon-trace/trace.jsonl` (moved to `trace.jsonl.old` past 20 MB):
+One JSON object per line to `~/.cache/icon-trace/trace.jsonl`, for the current GNOME Shell session: the first record (`enabled`) carries the Shell's process id, and when a new Shell starts, the previous session's log moves to `trace.jsonl.old` (so does a log past 20 MB). Locking the screen, which disables and re-enables extensions, keeps the session's log.
 
 - **`window`**: when a window appears, when its `WM_CLASS` or GTK application id changes (the only times the tracker decides again), and on a dump.
   - `window`: the facts GNOME looks at: class, instance, sandbox id, GTK app id, startup id, pid, remote, transient-for.
@@ -48,7 +55,7 @@ Write anything to `~/.cache/icon-trace/dump` for a full dump of the current wind
 make trace-install
 ```
 
-Log out and back in, then `gnome-extensions enable icon-trace@adavidys`. Read it, for example:
+Log out and back in, then `gnome-extensions enable icon-trace@adavidys`. Open its preferences, or read the log directly, for example:
 
 ```bash
 tail -f ~/.cache/icon-trace/trace.jsonl | jq -c 'select(.kind == "window") | {title: .window.title, by: .gnome.by, app: .app.id, name: .app.name, drawn: .app.drawn}'
