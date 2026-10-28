@@ -34,7 +34,7 @@ export class WineSource {
             return null;
         const map = index.map('wine');
         for (const stem of ctx.stems) {
-            const id = map.get(`${ctx.prefix}\n${normalize(stem)}`);
+            const id = index.find(map, `${ctx.prefix}\n${normalize(stem)}`, ctx);
             if (id)
                 return {id};
         }

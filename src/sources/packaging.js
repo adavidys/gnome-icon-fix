@@ -22,7 +22,7 @@ export class PackagingSource {
 
     identify(ctx, index) {
         const snap = ctx.env.SNAP_INSTANCE_NAME || ctx.env.SNAP_NAME;
-        const bySnap = snap && index.map('snap').get(snap);
+        const bySnap = snap && index.find(index.map('snap'), snap, ctx);
         if (bySnap)
             return {id: bySnap};
 

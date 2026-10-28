@@ -46,7 +46,7 @@ export function readShortcuts(path) {
     }
     const unquote = str => typeof str === 'string' ? str.replace(/^"(.*)"$/, '$1') || null : null;
     return Object.values(vdf.shortcuts ?? {})
-        .filter(s => typeof s?.appid === 'number')
+        .filter(s => typeof s.appid === 'number')
         .map(s => ({
             id: String(s.appid >>> 0),
             name: s.appname || null,
@@ -100,7 +100,7 @@ export class SteamSource {
             const folders = parseVdf(readText(path) ?? '').libraryfolders ?? {};
             // Old format: "1" "/path"; current: "0" { "path" "/path" ... }
             return Object.values(folders)
-                .map(f => canonical(typeof f === 'string' ? f : f?.path))
+                .map(f => canonical(typeof f === 'string' ? f : f.path))
                 .filter(Boolean);
         });
         this._shortcuts = new StampCache(readShortcuts);
@@ -147,7 +147,8 @@ export class SteamSource {
             return shortcut ? shortcutLook(shortcut).icon : null;
         }
         const name = `steam_icon_${gameId}`;
-        return findHicolorIcon(dataDir(), name) ?? findHicolorIcon(flatpakShare(), name);
+        return findHicolorIcon(dataDir(), name) ?? findHicolorIcon(flatpakShare(), name) ??
+            this._libraryIcon(gameId);
     }
 
     // umu (Heroic, Lutris) sets SteamAppId too, along with GAMEID.
@@ -160,8 +161,9 @@ export class SteamSource {
         const ids = this._ids(ctx);
         ctx.steamIds = ids;
         for (const id of ids) {
-            if (steam.has(id))
-                return {id: steam.get(id)};
+            const found = index.find(steam, id, ctx);
+            if (found)
+                return {id: found};
         }
 
         // Started outside Steam, or its environment couldn't be read: the
@@ -171,7 +173,8 @@ export class SteamSource {
             return null;
         if (!ids.includes(game.id))
             ids.push(game.id);
-        return steam.has(game.id) ? {id: steam.get(game.id)} : null;
+        const found = index.find(steam, game.id, ctx);
+        return found ? {id: found} : null;
     }
 
     fallback(ctx) {
@@ -184,8 +187,10 @@ export class SteamSource {
         const iconName = `steam_icon_${id}`;
         return {
             iconName,
-            // Flatpak Steam keeps its icons where the icon theme can't see them.
-            icon: findHicolorIcon(flatpakShare(), iconName),
+            // Flatpak Steam keeps its icons where the icon theme can't see
+            // them. Without a shortcut icon: Steam's library icon, unless the
+            // game runs through Proton, whose .exe has a sharper one.
+            icon: findHicolorIcon(flatpakShare(), iconName) ?? (ctx.wine ? null : this._libraryIcon(id)),
             name: this._games().find(g => g.id === id)?.name ?? null,
         };
     }
@@ -206,6 +211,21 @@ export class SteamSource {
         // Last: umu ids follow Steam's only for games the umu database knows.
         add(ctx.env.GAMEID?.match(/^umu-(\d+)$/)?.[1]);
         return ids;
+    }
+
+    // The icon Steam shows for a game in its library, which it keeps for
+    // every game, shortcut or not: appcache/librarycache/<id>/<sha1>.jpg
+    // (<id>_icon.jpg before 2024). Only 32 px.
+    _libraryIcon(id) {
+        for (const root of this._roots()) {
+            const dir = `${root}/appcache/librarycache/${id}`;
+            const icon = listDir(dir).find(name => /^[0-9a-f]{40}\.jpg$/.test(name));
+            if (icon)
+                return `${dir}/${icon}`;
+            if (exists(`${dir}_icon.jpg`))
+                return `${dir}_icon.jpg`;
+        }
+        return null;
     }
 
     // The real Steam roots: ~/.steam/steam is usually a link to another.

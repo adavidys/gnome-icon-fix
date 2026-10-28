@@ -7,7 +7,7 @@
 // frame rate (FPS counters) while everything else stays the same.
 
 import {tryCall} from './appindex.js';
-import {GENERIC_BINARIES, isWineProcess, programFromArgv, winePrefixOf, wineToHost} from './process.js';
+import {GENERIC_BINARIES, isWineProcess, mappedProgram, programFromArgv, winePrefixOf, wineToHost} from './process.js';
 import {basename, canonical, exeStem, normalize, pathKey} from './util.js';
 
 const NO_PROCESS = {pid: 0, argv: [], exe: null, cwd: null, env: {}};
@@ -21,7 +21,8 @@ const NO_PROCESS = {pid: 0, argv: [], exe: null, cwd: null, env: {}};
 //   wine: whether it's a Wine process; prefix: its Wine prefix
 //   stems: lowercased program names without extension ("game" for
 //          C:\Games\Game.exe, and the window class for Wine)
-//   paths: host paths of the program; cwd: its working folder
+//   paths: host paths of the program (for Wine, first the .exe it has
+//          mapped, see mappedProgram()); cwd: its working folder
 // Sources may add their own fields to share work between their calls.
 export function windowContext(hints) {
     const proc = hints.proc ?? NO_PROCESS;
@@ -37,6 +38,10 @@ export function windowContext(hints) {
             paths.add(host);
     };
     const program = programFromArgv(proc.argv);
+    // The .exe a Wine process really runs, wherever its drive letter points.
+    const mapped = wine && program?.path ? mappedProgram(proc.pid, program.path) : null;
+    if (mapped)
+        paths.add(mapped);
     if (program?.flatpak)
         stems.add(program.flatpak);
     else if (program?.path)
@@ -84,8 +89,12 @@ function identify(index, sources, ctx) {
     }
 
     // A guess must not hand a game one launcher started to another
-    // launcher's shortcut for the same game (same name, same folder).
-    const fits = id => id && (!ctx.launcher || (index.owner.get(id) ?? ctx.launcher) === ctx.launcher);
+    // launcher's shortcut for the same game (same name, same folder), nor a
+    // native program to a Wine menu entry with the same program name.
+    const fits = id => {
+        const owner = index.owner.get(id);
+        return !!id && (ctx.wine || owner !== 'wine') && (!ctx.launcher || (owner ?? ctx.launcher) === ctx.launcher);
+    };
 
     for (const key of [ctx.sandboxId, ctx.gtkId, ctx.wmClass, ctx.wmInstance]) {
         const id = index.lookup(key);

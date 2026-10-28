@@ -3,7 +3,7 @@
 
 import GLib from 'gi://GLib';
 
-import {basename, canonical, home} from './util.js';
+import {basename, canonical, exists, home} from './util.js';
 
 const decoder = new TextDecoder();
 
@@ -88,6 +88,33 @@ export function wineToHost(path, prefix) {
     return canonical(target.startsWith('/') ? `${target}/${rest}` : `${prefix}/dosdevices/${target}/${rest}`);
 }
 
+// The host path of the Windows program a Wine process runs, as the kernel
+// sees it: Wine maps the .exe into memory, so /proc/<pid>/maps has its real
+// path whatever drive letter argv shows (umu gives the game folder a letter
+// of its own). Found by the program's file name; null if it isn't mapped.
+export function mappedProgram(pid, program) {
+    if (!(pid > 0) || !program)
+        return null;
+    let maps;
+    try {
+        maps = decoder.decode(GLib.file_get_contents(`/proc/${pid}/maps`)[1]);
+    } catch {
+        return null;
+    }
+    const name = `/${basename(program).toLowerCase()}`;
+    for (const line of maps.split('\n')) {
+        // address perms offset dev inode path (which may contain spaces)
+        const path = line.match(/^\S+ \S+ \S+ \S+ \S+\s+(\/.+)$/)?.[1];
+        if (!path?.toLowerCase().endsWith(name))
+            continue;
+        // A sandboxed process has its own mount namespace, but Flatpak and
+        // Steam's runtime keep the home folder at the same place.
+        if (exists(path))
+            return canonical(path);
+    }
+    return null;
+}
+
 // envKeys: the environment variables to keep (all of a Proton game's
 // environment is tens of kilobytes; the sources need a handful).
 export function readProcess(pid, envKeys) {
@@ -96,8 +123,7 @@ export function readProcess(pid, envKeys) {
         return info;
 
     try {
-        const [, bytes] = GLib.file_get_contents(`/proc/${pid}/cmdline`);
-        info.argv = decoder.decode(bytes).split('\0').filter(Boolean);
+        info.argv = decoder.decode(GLib.file_get_contents(`/proc/${pid}/cmdline`)[1]).split('\0').filter(Boolean);
     } catch {}
 
     for (const link of ['exe', 'cwd']) {
@@ -107,8 +133,7 @@ export function readProcess(pid, envKeys) {
     }
 
     try {
-        const [, bytes] = GLib.file_get_contents(`/proc/${pid}/environ`);
-        for (const kv of decoder.decode(bytes).split('\0')) {
+        for (const kv of decoder.decode(GLib.file_get_contents(`/proc/${pid}/environ`)[1]).split('\0')) {
             const eq = kv.indexOf('=');
             if (eq > 0 && envKeys.has(kv.slice(0, eq)))
                 info.env[kv.slice(0, eq)] = kv.slice(eq + 1);

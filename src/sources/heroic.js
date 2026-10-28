@@ -2,12 +2,15 @@
 // (Nile) and sideloaded games.
 //
 // Its shortcuts run heroic://launch/... with the game's appName. A running
-// game is told apart by HEROIC_APP_NAME (exported by recent Heroic
-// versions) or by its install folder from the stores' installed.json.
+// game is told apart by HEROIC_APP_NAME (some versions export it), by the
+// Wine prefix Heroic made for it (GamesConfig/<appName>.json), or by its
+// install folder from the stores' installed.json.
 
 import {guessPaths} from '../lib/matcher.js';
 import {exeInfo} from '../lib/peicon.js';
-import {StampCache, canonical, configDir, exists, home, isSpecificDir, isUnder, pathKey, readJson} from '../lib/util.js';
+import {
+    StampCache, basename, canonical, configDir, exists, home, isSpecificDir, isUnder, listDir, pathKey, readJson,
+} from '../lib/util.js';
 
 const SANDBOX = 'com.heroicgameslauncher.hgl';
 
@@ -83,12 +86,24 @@ export function installedGames(json) {
     return games;
 }
 
+// GamesConfig/<appName>.json ({<appName>: {winePrefix, ...}}) -> the prefix
+// (pathKey'd) Heroic runs that game in, or null.
+export function gamePrefix(appName, json) {
+    const prefix = canonical(json?.[appName]?.winePrefix);
+    return prefix ? pathKey(prefix) : null;
+}
+
 export class HeroicSource {
     constructor() {
         this.name = 'heroic';
         this.sandbox = SANDBOX;
         this.envKeys = ['HEROIC_APP_NAME'];
         this._installed = new StampCache(path => installedGames(readJson(path)));
+        this._configLists = new StampCache(dir => listDir(dir).filter(name => name.endsWith('.json')));
+        this._configs = new StampCache(path => {
+            const appName = basename(path).replace(/\.json$/, '');
+            return {appName, prefix: gamePrefix(appName, readJson(path))};
+        });
     }
 
     indexEntry(entry, _argv, index) {
@@ -99,18 +114,20 @@ export class HeroicSource {
         return true;
     }
 
+    // Native Heroic runs games outside any sandbox and doesn't always say
+    // so in their environment; the prefix it made for them does.
     launched(ctx) {
-        return !!ctx.env.HEROIC_APP_NAME;
+        return !!ctx.env.HEROIC_APP_NAME || this._appsInPrefix(ctx).length > 0;
     }
 
     identify(ctx, index) {
         const shortcuts = index.map('heroic');
-        const appName = ctx.env.HEROIC_APP_NAME;
-        if (appName && shortcuts.has(appName))
-            return {id: shortcuts.get(appName)};
+        const byEnv = index.find(shortcuts, ctx.env.HEROIC_APP_NAME, ctx);
+        if (byEnv)
+            return {id: byEnv};
 
-        const game = this._game(ctx);
-        return game && shortcuts.has(game.appName) ? {id: shortcuts.get(game.appName)} : null;
+        const id = index.find(shortcuts, this._game(ctx)?.appName, ctx);
+        return id ? {id} : null;
     }
 
     entryIcon(entry) {
@@ -122,24 +139,44 @@ export class HeroicSource {
 
     fallback(ctx) {
         const game = this._game(ctx);
-        return game ? {icon: iconOf(game.appName), name: game.title} : null;
+        const icon = game && iconOf(game.appName);
+        return icon || game?.title ? {icon, name: game.title} : null;
     }
 
     _games() {
         return roots().flatMap(root => INSTALLED.flatMap(file => this._installed.get(`${root}/${file}`) ?? []));
     }
 
+    // The appNames whose Heroic prefix the process runs in (Proton's
+    // WINEPREFIX is <prefix>/pfx).
+    _appsInPrefix(ctx) {
+        if (ctx.heroicApps === undefined) {
+            const keys = [ctx.prefix, canonical(ctx.env.STEAM_COMPAT_DATA_PATH)].filter(Boolean)
+                .map(pathKey).flatMap(p => p.endsWith('/pfx') ? [p, p.slice(0, -4)] : [p]);
+            ctx.heroicApps = keys.length ? roots().flatMap(root => {
+                const dir = `${root}/GamesConfig`;
+                return (this._configLists.get(dir) ?? []).map(name => this._configs.get(`${dir}/${name}`));
+            }).filter(c => c?.prefix && keys.includes(c.prefix)).map(c => c.appName) : [];
+        }
+        return ctx.heroicApps;
+    }
+
     _game(ctx) {
         if (ctx.heroic !== undefined)
             return ctx.heroic;
         const appName = ctx.env.HEROIC_APP_NAME;
+        const inPrefix = this._appsInPrefix(ctx);
         const where = guessPaths(ctx, this);
         let game = null;
-        if (appName || where.length) {
+        if (appName || inPrefix.length || where.length) {
             const games = this._games();
-            game = (appName && games.find(g => g.appName === appName)) ||
-                games.find(g => where.some(path => isUnder(path, g.dir))) ||
-                (appName ? {appName, title: null} : null);
+            const named = name => games.find(g => g.appName === name) ?? {appName: name, title: null};
+            // Several games may share a prefix: then their folders decide.
+            const candidates = inPrefix.length ? games.filter(g => inPrefix.includes(g.appName)) : games;
+            game = (appName && named(appName)) ||
+                (inPrefix.length === 1 && named(inPrefix[0])) ||
+                candidates.find(g => where.some(path => isUnder(path, g.dir))) ||
+                null;
         }
         ctx.heroic = game;
         return game;

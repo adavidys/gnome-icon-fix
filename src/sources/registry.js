@@ -10,7 +10,9 @@
 //       Called for every .desktop entry whenever the index is rebuilt, which
 //       happens often: must not touch the disk. Returns true when the entry
 //       is one of this source's launchers, so its Exec isn't also indexed
-//       as a plain program. Sources keep their keys in index.map(name).
+//       as a plain program. Sources keep their keys in index.map(name) and
+//       look them up with index.find(), which prefers the entry of the
+//       window's own flavor (native or the launcher's Flatpak).
 //   identify(ctx, index) -> {id} | null
 //       The desktop entry of a window (ctx: see windowContext() in
 //       lib/matcher.js), from exact signals only.

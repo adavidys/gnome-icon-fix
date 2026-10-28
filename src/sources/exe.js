@@ -35,16 +35,8 @@ export class ExeSource {
         return {icon: info.icon, name: info.name ?? stripExt(basename(path))};
     }
 
+    // The .exe the process has mapped comes first in ctx.paths.
     _exe(ctx) {
-        const found = ctx.paths.find(p => /\.exe$/i.test(p) && exists(p));
-        if (found)
-            return found;
-        // Drives other than Z: may not resolve (umu maps the game folder to
-        // its own letter); games usually run from their own folder.
-        const program = programFromArgv(ctx.proc.argv)?.path;
-        if (!program || !ctx.cwd || !/\.exe$/i.test(program))
-            return null;
-        const guess = canonical(`${ctx.cwd}/${basename(program)}`);
-        return exists(guess) ? guess : null;
+        return ctx.paths.find(p => /\.exe$/i.test(p) && exists(p)) ?? null;
     }
 }

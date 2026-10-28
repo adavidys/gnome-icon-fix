@@ -80,16 +80,21 @@ export function readJson(path) {
     }
 }
 
-// Cheap change detector for a file or directory: mtime (µs) and size.
+// Cheap change detector for a file or directory: mtime (µs) and size; null
+// if they can't be read. (In a folder we may list but not enter, Gio
+// answers without them rather than failing.)
 export function fileStamp(path) {
+    let info;
     try {
-        const info = Gio.File.new_for_path(path).query_info(
+        info = Gio.File.new_for_path(path).query_info(
             'time::modified,time::modified-usec,standard::size', Gio.FileQueryInfoFlags.NONE, null);
-        return `${info.get_attribute_uint64('time::modified')}.` +
-            `${info.get_attribute_uint32('time::modified-usec')}:${info.get_size()}`;
     } catch {
         return null;
     }
+    if (!info.has_attribute('time::modified') || !info.has_attribute('standard::size'))
+        return null;
+    return `${info.get_attribute_uint64('time::modified')}.` +
+        `${info.get_attribute_uint32('time::modified-usec')}:${info.get_attribute_uint64('standard::size')}`;
 }
 
 // Runs load(path) on demand and keeps the result until the file (or, for a

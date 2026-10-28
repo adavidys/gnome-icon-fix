@@ -58,7 +58,7 @@ class Resources {
     }
 
     _bytes(offset, length) {
-        if (offset < 0 || length < 0 || offset + length > this._size)
+        if (offset < 0 || offset + length > this._size)
             throw new RangeError('outside the resource section');
         return this._reader.bytes(this._start + offset, length);
     }
@@ -184,21 +184,23 @@ function decodeIcon(data) {
         // Bottom-up rows.
         const row = pixels + (height - 1 - y) * stride;
         for (let x = 0; x < width; x++) {
-            let b, g, r, a = 255;
+            // BGR(A) in the file, from the palette below 16 bits.
+            let p, a = 255;
             if (bpp <= 8) {
                 const bit = x * bpp;
-                const index = data[row + (bit >> 3)] >> (8 - bpp - (bit & 7)) & (1 << bpp) - 1;
-                const p = palette + index * 4;
-                [b, g, r] = [data[p], data[p + 1], data[p + 2]];
+                p = palette + (data[row + (bit >> 3)] >> (8 - bpp - (bit & 7)) & (1 << bpp) - 1) * 4;
             } else {
-                const p = row + x * (bpp / 8);
-                [b, g, r] = [data[p], data[p + 1], data[p + 2]];
+                p = row + x * (bpp / 8);
                 if (bpp === 32) {
                     a = data[p + 3];
                     anyAlpha ||= a !== 0;
                 }
             }
-            rgba.set([r, g, b, a], (y * width + x) * 4);
+            const out = (y * width + x) * 4;
+            rgba[out] = data[p + 2];
+            rgba[out + 1] = data[p + 1];
+            rgba[out + 2] = data[p];
+            rgba[out + 3] = a;
         }
     }
     // Without an alpha channel, transparency comes from the AND mask.
@@ -317,11 +319,8 @@ export function exeInfo(path, dir = cacheDir()) {
         log.debug(`${path}: ${info?.icon ? 'icon' : 'no icon'}, name ${JSON.stringify(info?.name ?? null)} (${Date.now() - start} ms)`);
     } catch (e) {
         log.debug(`can't read ${path} as a Windows program: ${e}`);
-    } finally {
-        try {
-            reader?.close();
-        } catch {}
     }
+    reader?.close();
     known.set(`${dir}\n${path}`, {stamp, info});
     return info;
 }

@@ -2,7 +2,7 @@ UUID := icon-fix@adavidys
 ZIP := dist/$(UUID).shell-extension.zip
 SOURCES := $(shell find src -type f ! -name gschemas.compiled) LICENSE
 
-.PHONY: all pack schemas install uninstall clean
+.PHONY: all pack schemas install uninstall clean check
 
 all: pack
 
@@ -35,3 +35,7 @@ uninstall:
 
 clean:
 	rm -rf dist src/schemas/gschemas.compiled
+
+# Tests of everything that runs outside GNOME Shell, with code coverage
+check:
+	sh tests/run.sh

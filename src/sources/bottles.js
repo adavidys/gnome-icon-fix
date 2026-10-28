@@ -15,10 +15,13 @@ const FLAGS = {
     '-e': 'executable', '--executable': 'executable',
 };
 
+const BOTTLES_APP = 'com.usebottles.bottles';
+
+// Native first, then Flatpak.
 function bottleDirs() {
     return [
         dataDir('bottles', 'bottles'),
-        home('.var', 'app', 'com.usebottles.bottles', 'data', 'bottles', 'bottles'),
+        home('.var', 'app', BOTTLES_APP, 'data', 'bottles', 'bottles'),
     ];
 }
 
@@ -67,7 +70,7 @@ export function bottleFromConfig(config) {
 export class BottlesSource {
     constructor() {
         this.name = 'bottles';
-        this.sandbox = 'com.usebottles.bottles';
+        this.sandbox = BOTTLES_APP;
         this.envKeys = ['BOTTLE'];
         this._configs = new StampCache(path => bottleFromConfig(parseYaml(readText(path))));
     }
@@ -105,7 +108,7 @@ export class BottlesSource {
             const names = bottle.programs.filter(p => p.stem === stem).map(p => p.name);
             for (const ref of refs) {
                 for (const key of [...names, `exe:${stem}`]) {
-                    const id = map.get(`${ref}\n${key}`);
+                    const id = index.find(map, `${ref}\n${key}`, ctx);
                     if (id)
                         return {id};
                 }
@@ -122,8 +125,13 @@ export class BottlesSource {
         // -b: the bottle's path, or its folder name (native) or Name
         // (Flatpak) under one of the bottles dirs.
         const ref = launch.bottle;
+        // Native and Flatpak bottles may share names: look where this
+        // entry's Bottles keeps them first.
+        const roots = bottleDirs();
+        if (argv.includes(BOTTLES_APP))
+            roots.reverse();
         const candidates = canonical(ref) ? [canonical(ref)]
-            : bottleDirs().flatMap(root => listDir(root).map(name => `${root}/${name}`));
+            : roots.flatMap(root => listDir(root).map(name => `${root}/${name}`));
         for (const dir of candidates) {
             const config = this._configs.get(`${dir}/bottle.yml`);
             if (!config || (dir !== canonical(ref) && basename(dir) !== ref && config.name !== ref))

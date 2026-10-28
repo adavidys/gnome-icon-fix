@@ -15,15 +15,16 @@ import {listDir, readText} from '../lib/util.js';
 export const MARKER = 'X-IconFix-Generated';
 export const GROUP = 'Desktop Entry';
 
-const SYNC_DELAY_MS = 1000;
-// How often to look for a missing folder (the launcher isn't installed yet).
-const WAIT_SECONDS = 30;
-
 export function applicationsDir() {
     return GLib.build_filenamev([GLib.get_user_data_dir(), 'applications']);
 }
 
 export class ShortcutMirror {
+    // Launchers rewrite their files in bursts: sync once they settle.
+    static syncDelayMs = 1000;
+    // How often to look for a missing folder (the launcher isn't installed).
+    static waitSeconds = 30;
+
     // prefix: file name prefix of our shortcuts; iconDir: the folder for
     // icons we make. Subclasses set up their own fields, then call start().
     constructor(prefix, iconDir) {
@@ -56,8 +57,8 @@ export class ShortcutMirror {
     }
 
     destroy() {
-        for (const path of new Set([...this._monitors.keys(), ...this._waits.keys()]))
-            this._unwatch(path);
+        Array.from(this._monitors.keys()).concat(Array.from(this._waits.keys()))
+            .forEach(path => this._unwatch(path));
         if (this._syncId) {
             GLib.source_remove(this._syncId);
             this._syncId = 0;
@@ -79,15 +80,15 @@ export class ShortcutMirror {
         const removed = [];
 
         GLib.mkdir_with_parents(this._target, 0o755);
-        for (const [name, data] of wanted) {
+        wanted.forEach((data, name) => {
             const path = GLib.build_filenamev([this._target, name]);
             const current = readText(path);
             if (current === data)
-                continue;
+                return;
             // Never overwrite a same-named file we didn't create.
             if (current !== null && !isGenerated(current)) {
                 log.warn(`not writing ${path}: a file Icon Fix didn't create is there`);
-                continue;
+                return;
             }
             try {
                 GLib.file_set_contents(path, data);
@@ -95,7 +96,7 @@ export class ShortcutMirror {
             } catch (e) {
                 log.warn(`can't write ${path}: ${e}`);
             }
-        }
+        });
 
         // Game uninstalled: drop its shortcut, and icons nothing uses anymore.
         for (const file of generatedFiles(this._prefix, this._iconDir)) {
@@ -135,7 +136,7 @@ export class ShortcutMirror {
     _watch(path) {
         const dir = Gio.File.new_for_path(path);
         if (!dir.query_exists(null)) {
-            this._waits.set(path, GLib.timeout_add_seconds(GLib.PRIORITY_LOW, WAIT_SECONDS, () => {
+            this._waits.set(path, GLib.timeout_add_seconds(GLib.PRIORITY_LOW, ShortcutMirror.waitSeconds, () => {
                 if (!dir.query_exists(null))
                     return GLib.SOURCE_CONTINUE;
                 this._waits.delete(path);
@@ -146,13 +147,7 @@ export class ShortcutMirror {
             return;
         }
 
-        let monitor;
-        try {
-            monitor = dir.monitor_directory(Gio.FileMonitorFlags.NONE, null);
-        } catch (e) {
-            log.warn(`can't watch ${path}: ${e}`);
-            return;
-        }
+        const monitor = dir.monitor_directory(Gio.FileMonitorFlags.NONE, null);
         monitor.connect('changed', (_monitor, file, _other, event) => {
             // The launcher was uninstalled: wait for it to come back.
             if (event === Gio.FileMonitorEvent.DELETED && file.equal(dir)) {
@@ -174,11 +169,10 @@ export class ShortcutMirror {
         this._waits.delete(path);
     }
 
-    // Launchers rewrite their files in bursts; settle first.
     _queueSync() {
         if (this._syncId)
             GLib.source_remove(this._syncId);
-        this._syncId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, SYNC_DELAY_MS, () => {
+        this._syncId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, ShortcutMirror.syncDelayMs, () => {
             this._syncId = 0;
             this.sync();
             return GLib.SOURCE_REMOVE;

@@ -97,7 +97,7 @@ export class LutrisSource {
 
     identify(ctx, index) {
         const game = this._game(ctx);
-        const id = game && index.map('lutris').get(game.slug);
+        const id = game && index.find(index.map('lutris'), game.slug, ctx);
         return id ? {id} : null;
     }
 

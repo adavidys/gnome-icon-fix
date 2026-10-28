@@ -9,7 +9,6 @@
 import GLib from 'gi://GLib';
 
 import {parseYaml} from '../lib/formats.js';
-import * as log from '../lib/log.js';
 import {exeInfo} from '../lib/peicon.js';
 import {exeStem, exists, listDir, readText} from '../lib/util.js';
 import {bottleFromConfig} from '../sources/bottles.js';
@@ -53,7 +52,8 @@ export function programShortcut(bottle, program, icons = iconDir()) {
     kf.set_string(GROUP, 'Icon', icon ?? BOTTLES_APP);
     kf.set_string(GROUP, 'Categories', 'Application;');
     // What Bottles' own shortcuts set: Wine names the window after the .exe.
-    kf.set_string(GROUP, 'StartupWMClass', exeStem(program.path ?? program.name));
+    if (program.path)
+        kf.set_string(GROUP, 'StartupWMClass', exeStem(program.path));
     kf.set_boolean(GROUP, MARKER, true);
     return kf.to_data()[0];
 }
@@ -85,13 +85,7 @@ export class FlatpakBottlesMirror extends ShortcutMirror {
             const text = readText(GLib.build_filenamev([dir, 'bottle.yml']));
             if (text === null)
                 continue;
-            let bottle;
-            try {
-                bottle = {dir, ...bottleFromConfig(parseYaml(text))};
-            } catch (e) {
-                log.warn(`can't read ${dir}/bottle.yml: ${e}`);
-                continue;
-            }
+            const bottle = {dir, ...bottleFromConfig(parseYaml(text))};
             for (const program of bottle.programs.filter(p => !p.removed)) {
                 const name = `${PREFIX}${slug(folder)}-${slug(program.name)}.desktop`;
                 if (!wanted.has(name))

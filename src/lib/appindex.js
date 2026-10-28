@@ -12,12 +12,24 @@ import {canonical, exeStem, isSpecificDir, normalize, pathKey, selfAndParents, s
 // Calls an optional source method; a broken source must not take the
 // others down with it.
 export function tryCall(source, method, ...args) {
+    const fn = source[method];
+    if (typeof fn !== 'function')
+        return null;
     try {
-        return source[method]?.(...args) ?? null;
+        return fn.apply(source, args) ?? null;
     } catch (e) {
         log.error(`${source.name}.${method}`, e);
         return null;
     }
+}
+
+// What runs an entry's launcher: the Flatpak app id (lowercased) when Exec
+// goes through `flatpak run`, 'native' otherwise.
+const NATIVE = 'native';
+
+// The flavor a window's process comes from, to compare with an entry's.
+export function flavorOf(ctx) {
+    return ctx.launcherSandbox?.toLowerCase() ?? NATIVE;
 }
 
 // Exec= -> argv, field codes (%u, %f...) dropped; [] if it can't be parsed.
@@ -48,6 +60,9 @@ export class AppIndex {
         this.owner = new Map();
         // Tables the sources keep for themselves, see map()
         this._maps = new Map();
+        this._sourceMaps = new Set();
+        // The flavor of the entry being indexed, see add()
+        this._flavor = null;
 
         // Folders shared by several entries (~/Games/run-foo.sh and
         // run-bar.sh) say nothing, so count first and keep unique ones.
@@ -71,6 +86,8 @@ export class AppIndex {
                 this.add(this.icon, e.icon.toLowerCase(), id);
 
             const argv = parseExec(e.exec);
+            const program = programFromArgv(argv);
+            this._flavor = program?.flatpak ?? NATIVE;
 
             // Every source sees every entry (Steam also indexes Icon=), any
             // of them can claim it as its launcher.
@@ -83,7 +100,6 @@ export class AppIndex {
             }
 
             if (!claimed) {
-                const program = programFromArgv(argv);
                 if (program?.flatpak) {
                     this.add(this.exec, program.flatpak, id);
                 } else if (program?.path) {
@@ -98,10 +114,12 @@ export class AppIndex {
             noteDir(canonical(e.path), id);
         }
 
-        for (const [dir, ids] of dirs) {
+        this._flavor = null;
+
+        dirs.forEach((ids, dir) => {
             if (ids.size === 1 && isSpecificDir(dir))
-                this.dir.set(pathKey(dir), [...ids][0]);
-        }
+                this.dir.set(pathKey(dir), ids.values().next().value);
+        });
     }
 
     // A table of the given name, for a source's own keys.
@@ -110,13 +128,30 @@ export class AppIndex {
         if (!map) {
             map = new Map();
             this._maps.set(name, map);
+            this._sourceMaps.add(map);
         }
         return map;
     }
 
+    // The first entry for a key wins. In the sources' tables, each key is
+    // also kept per flavor: native and Flatpak versions of a launcher may
+    // both have a shortcut for the same game.
     add(map, key, id) {
-        if (key && !map.has(key))
+        if (!key)
+            return;
+        if (!map.has(key))
             map.set(key, id);
+        const flavored = `${this._flavor}\0${key}`;
+        if (this._flavor && this._sourceMaps.has(map) && !map.has(flavored))
+            map.set(flavored, id);
+    }
+
+    // A source's entry for a key, preferring one of the window's own flavor
+    // (a native game gets the native launcher's shortcut).
+    find(map, key, ctx) {
+        if (!key)
+            return null;
+        return map.get(`${flavorOf(ctx)}\0${key}`) ?? map.get(key) ?? null;
     }
 
     // Looks a raw string (wm class, binary...) up in every map, strongest first.

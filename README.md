@@ -77,9 +77,13 @@ Shortcuts that Flatpak Lutris creates (**Create application menu shortcut**) nam
 
 If you added the same game folder to several launchers, each window is matched to the launcher that actually started it.
 
+The native and Flathub versions of a launcher can be installed side by side: a game gets the shortcut of the version that started it (Flatpak shortcuts run `flatpak run <launcher>`, native ones don't), whichever was created first. Native Heroic doesn't mark its games' environment, so its games are recognized by the Wine prefix Heroic set up for them.
+
 ### Windows games without an icon
 
-When nothing else knows a Wine game's icon, Icon Fix reads the one stored in its `.exe` (and its product name, if it has one) and caches it as a PNG in `~/.cache/icon-fix`. The game files are only read, never changed.
+When nothing else knows a Wine game's icon, Icon Fix reads the one stored in its `.exe` (and its product name, if it has one) and caches it as a PNG in `~/.cache/icon-fix`. The game files are only read, never changed. Which `.exe` a game runs comes from the kernel (the files the Wine process has mapped), so it's found even when Proton or umu show it under a drive letter of their own.
+
+A Steam game with no shortcut icon gets the icon Steam shows for it in its library. That one is small, so games that run through Proton keep the sharper icon from their `.exe`.
 
 The same goes for shortcuts with an empty `Icon=` or one that points nowhere: Icon Fix finds the game the shortcut launches (a `.exe` in `Exec`, or the game behind a Steam, Heroic, Lutris or Bottles shortcut) and shows its icon in the app grid, search and dock. Native Linux programs keep no icon inside them, so this only works for Windows games.
 
