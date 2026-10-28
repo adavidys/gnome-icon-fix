@@ -12,6 +12,7 @@ import St from 'gi://St';
 import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {Tracer} from './debug/trace.js';
 import {AppIndex, parseExec, tryCall} from './lib/appindex.js';
 import * as log from './lib/log.js';
 import {matchTitle, matchWindow} from './lib/matcher.js';
@@ -72,9 +73,30 @@ export default class IconFixExtension extends Extension {
         this._patch();
         this._splitter = new WindowSplitter((win, splitter) => this._launcherGameApp(win, splitter));
         this._refreshRunning();
+
+        // Debug branch: the trace behind the Debug tab, set up last so it
+        // sees what Icon Fix shows.
+        this._settings.connectObject('changed::debug-trace', () => this._syncTracer(), this);
+        this._syncTracer();
+    }
+
+    _syncTracer() {
+        const enabled = this._settings.get_boolean('debug-trace');
+        if (enabled && !this._tracer) {
+            try {
+                this._tracer = new Tracer();
+            } catch (e) {
+                log.error('debug trace', e);
+            }
+        } else if (!enabled) {
+            this._tracer?.destroy();
+            this._tracer = null;
+        }
     }
 
     disable() {
+        this._tracer?.destroy();
+        this._tracer = null;
         this._splitter.destroy();
         this._splitter = null;
         this._unpatch();

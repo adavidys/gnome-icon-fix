@@ -1,21 +1,20 @@
-// Icon Trace: a debugging extension that shows how GNOME Shell decides
-// which app (and so which icon and name) a window gets.
+// Debug branch only: records how GNOME Shell decides which app (and so which
+// name and icon) every window gets, for the Debug tab of the preferences
+// (debug/page.js).
 //
 // For every window it replays, step by step, what get_app_for_window() in
 // GNOME Shell 50's shell-window-tracker.c does, with the public lookups that
 // code itself uses, and records which step decided and why the others
-// didn't (including matches the tracker rejects). For the app it explains
-// where shell-app.c takes the name and the icon from, and whether the icon
-// theme can show that icon. It also records every JavaScript caller that
-// asks for an app's icon or name or a window's app, with its stack, so it's
-// visible who in the Shell (dash, Alt+Tab, overview, an extension) shows
-// what.
+// didn't (including matches the tracker rejects); then what the tracker
+// really answered, and what the Shell shows after Icon Fix. For the app it
+// explains where shell-app.c takes the name and icon from and whether the
+// icon theme can show that icon. It also records every JavaScript caller
+// that asks for an app's icon or name or a window's app, with its stack.
 //
-// Output, one JSON object per line: ~/.cache/icon-trace/trace.jsonl, for
+// Output, one JSON object per line: ~/.cache/icon-fix/debug/trace.jsonl, for
 // the current GNOME Shell session only (the previous session's is moved to
 // trace.jsonl.old, and so is a log past 20 MB). Write anything to
-// ~/.cache/icon-trace/dump to get a full dump of all windows and running
-// apps. The preferences window shows the log.
+// ~/.cache/icon-fix/debug/dump to get a full dump of all windows.
 
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
@@ -23,12 +22,12 @@ import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
-import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
+import {InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Config from 'resource:///org/gnome/shell/misc/config.js';
 
-const DIR = GLib.build_filenamev([GLib.get_user_cache_dir(), 'icon-trace']);
-const LOG = GLib.build_filenamev([DIR, 'trace.jsonl']);
-const DUMP = GLib.build_filenamev([DIR, 'dump']);
+export const DIR = GLib.build_filenamev([GLib.get_user_cache_dir(), 'icon-fix', 'debug']);
+export const LOG = GLib.build_filenamev([DIR, 'trace.jsonl']);
+export const DUMP = GLib.build_filenamev([DIR, 'dump']);
 const MAX_LOG_BYTES = 20 << 20;
 // Frames kept of each caller's stack; the same stack is recorded once,
 // then only counted.
@@ -38,6 +37,19 @@ const FALLBACK_ICON = 'application-x-executable';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+
+// GNOME's own methods, taken when this module is first loaded: before Icon
+// Fix (or the splitter) replaces them, so the trace can tell what GNOME
+// itself answers from what is shown after Icon Fix.
+const RAW = {
+    getIcon: Shell.App.prototype.get_icon,
+    getName: Shell.App.prototype.get_name,
+    getWindows: Shell.App.prototype.get_windows,
+    getWindowApp: Shell.WindowTracker.prototype.get_window_app,
+};
+
+// Frames of Icon Fix itself (this file, its patched methods) aren't callers.
+const OWN_FILES = import.meta.url.replace(/\/debug\/trace\.js$/, '/');
 
 // The Shell process: a new one is a new session. The extension is also
 // disabled and enabled again around a locked screen, which isn't.
@@ -67,14 +79,14 @@ function write(record) {
         stream.write_all(encoder.encode(`${JSON.stringify({t: Date.now(), ...record})}\n`), null);
         stream.close(null);
     } catch (e) {
-        console.error(`Icon Trace: can't write ${LOG}: ${e}`);
+        console.error(`Icon Fix debug: can't write ${LOG}: ${e}`);
     }
 }
 
 // The JS stack of whoever called us, without our own frames.
 function callers() {
     return (new Error().stack ?? '').split('\n')
-        .filter(line => line && !line.includes(import.meta.url))
+        .filter(line => line && !line.includes(OWN_FILES))
         .slice(0, STACK_FRAMES)
         .map(line => line.replace(/^resource:\/\/\/org\/gnome\/shell\//, '')
             .replace(/@resource:\/\/\/org\/gnome\/shell\//, '@')
@@ -92,7 +104,7 @@ function appFacts(app, theme) {
     if (!app)
         return null;
     const info = app.get_app_info();
-    const gicon = Shell.App.prototype.get_icon.call(app);
+    const gicon = RAW.getIcon.call(app);
     let drawn;
     if (gicon instanceof Gio.ThemedIcon) {
         const found = gicon.get_names().find(n => theme.has_icon(n));
@@ -103,12 +115,12 @@ function appFacts(app, theme) {
     } else {
         drawn = gicon ? gicon.to_string() : FALLBACK_ICON;
     }
-    const firstWindow = Shell.App.prototype.get_windows.call(app)[0];
+    const firstWindow = RAW.getWindows.call(app)[0];
     return {
         id: app.get_id(),
         windowBacked: app.is_window_backed(),
         desktopFile: info?.get_filename?.() ?? null,
-        name: Shell.App.prototype.get_name.call(app),
+        name: RAW.getName.call(app),
         nameFrom: info ? 'Name= of the .desktop file (translated)'
             : firstWindow?.get_wm_class() ? 'WM_CLASS of its window (window-backed app)' : '"Unknown" (window-backed, no WM_CLASS)',
         iconKey: info?.get_string?.('Icon') ?? null,
@@ -116,8 +128,7 @@ function appFacts(app, theme) {
         iconFrom: info ? 'Icon= of the .desktop file' : `${FALLBACK_ICON} (window-backed app)`,
         drawn,
         startupWMClass: info?.get_startup_wm_class?.() ?? null,
-        // What the Shell UI gets now (extensions such as Icon Fix may
-        // change it).
+        // What the Shell UI gets now, after Icon Fix.
         shownName: app.get_name(),
         shownIcon: app.get_icon()?.to_string() ?? null,
         state: app.state,
@@ -252,13 +263,13 @@ export function replayDecision(win, tracker, appSys, seen = new Set()) {
     return {steps, decided: windowBackedId(win), by: 'window-backed app'};
 }
 
-export default class IconTraceExtension extends Extension {
-    enable() {
+export class Tracer {
+    constructor() {
         GLib.mkdir_with_parents(DIR, 0o755);
         try {
             startSession();
         } catch (e) {
-            console.error(`Icon Trace: can't start the session log: ${e}`);
+            console.error(`Icon Fix debug: can't start the session log: ${e}`);
         }
         this._tracker = Shell.WindowTracker.get_default();
         this._appSys = Shell.AppSystem.get_default();
@@ -311,7 +322,7 @@ export default class IconTraceExtension extends Extension {
         this._dump();
     }
 
-    disable() {
+    destroy() {
         for (const id of this._idles)
             GLib.source_remove(id);
         this._idles = null;
@@ -378,16 +389,21 @@ export default class IconTraceExtension extends Extension {
         if (!win.get_display())
             return;
         const replay = replayDecision(win, this._tracker, this._appSys);
+        // What the tracker really holds for the window, and what the Shell
+        // gets after Icon Fix moved it (split.js).
+        const tracked = RAW.getWindowApp.call(this._tracker, win);
         const shown = this._tracker.get_window_app(win);
         write({
             kind: 'window', event,
             window: windowFacts(win),
-            gnome: replay,
+            gnome: {...replay, tracked: tracked?.get_id() ?? null},
             app: appFacts(shown, this._theme),
-            // false: something (an extension like Icon Fix, or the tracker's
-            // cache of an older answer) gives another app than GNOME's own
-            // steps would today.
-            agrees: replay.decided === shown?.get_id(),
+            gnomeApp: tracked !== shown ? appFacts(tracked, this._theme) : null,
+            // false: the tracker kept an older answer than its steps give
+            // today.
+            agrees: replay.decided === tracked?.get_id(),
+            // true: Icon Fix gave the window another app than GNOME did.
+            moved: tracked !== shown,
         });
     }
 

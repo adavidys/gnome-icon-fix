@@ -1,7 +1,0 @@
-{
-  "uuid": "icon-trace@adavidys",
-  "name": "Icon Trace (debug)",
-  "description": "Debugging tool: records step by step how GNOME Shell picks the app, name and icon of every window, and who in the Shell asks for icons. Writes to ~/.cache/icon-trace/trace.jsonl.",
-  "shell-version": ["50", "51"],
-  "url": "https://github.com/adavidys/gnome-icon-fix"
-}

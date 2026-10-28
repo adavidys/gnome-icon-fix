@@ -10,6 +10,7 @@ import Gtk from 'gi://Gtk';
 
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
+import {debugPage} from './debug/page.js';
 import * as bottlesMirror from './mirror/bottles-flatpak.js';
 import * as steamMirror from './mirror/steam-flatpak.js';
 
@@ -100,6 +101,9 @@ export default class IconFixPreferences extends ExtensionPreferences {
         });
         this.getSettings().bind('debug-logging', debugRow, 'active', Gio.SettingsBindFlags.DEFAULT);
         troubleshooting.add(debugRow);
+
+        // Debug branch: how GNOME picked each window's app, step by step.
+        window.add(debugPage(window, this.getSettings()));
 
         const page = new Adw.PreferencesPage({
             title: 'Support',
