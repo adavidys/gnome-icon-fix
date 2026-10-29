@@ -277,7 +277,7 @@ export default class IconFixExtension extends Extension {
         // rate (FPS counters), so a title change only redoes that lookup.
         let found = cached?.key === key ? cached : null;
         if (!found) {
-            const {primary, fallbacks} = matchWindow(this._index, this._sources, {
+            const {primary, fallbacks, launcher} = matchWindow(this._index, this._sources, {
                 wmClass: win.get_wm_class(),
                 wmInstance: win.get_wm_class_instance(),
                 gtkId: win.get_gtk_application_id(),
@@ -288,12 +288,13 @@ export default class IconFixExtension extends Extension {
                 key,
                 primary: this._realize(primary),
                 fallback: this._fallback(fallbacks),
+                launcher,
             };
             log.debug(`window "${title}" (${win.get_wm_class()}, pid ${pid}): ${describe(found)}`);
         }
 
-        const result = found.primary ?? this._realize(matchTitle(this._index, title)) ?? found.fallback;
-        this._cache.set(app, {key, primary: found.primary, fallback: found.fallback, title, result});
+        const result = found.primary ?? this._realize(matchTitle(this._index, title, found.launcher)) ?? found.fallback;
+        this._cache.set(app, {key, primary: found.primary, fallback: found.fallback, launcher: found.launcher, title, result});
         if (cached && cached.result?.tag !== result?.tag)
             this._queueNotify(app);
         return result;
@@ -396,7 +397,7 @@ export default class IconFixExtension extends Extension {
         }
         const sandbox = win.get_sandboxed_app_id();
         const inLauncher = LAUNCHER_SANDBOXES.has(sandbox);
-        const {primary, fallbacks} = matchWindow(this._index, this._sources, {
+        const {primary, fallbacks, launcher} = matchWindow(this._index, this._sources, {
             wmClass: win.get_wm_class(),
             wmInstance: win.get_wm_class_instance(),
             gtkId: win.get_gtk_application_id(),
@@ -414,7 +415,7 @@ export default class IconFixExtension extends Extension {
         // could have been used. A game in a launcher's sandbox isn't matched
         // by its title (_launcherGameApp()): that could be another
         // launcher's shortcut for it.
-        const title = primary || inLauncher ? null : matchTitle(this._index, win.get_title());
+        const title = primary || inLauncher ? null : matchTitle(this._index, win.get_title(), launcher);
         const head = primary ? [entry(primary.id, primary.by)] : title ? [entry(title.id, 'window title')] : [];
         let nameTaken = head.length > 0, iconTaken = head.length > 0;
         const listed = [...head, ...fallbacks.map(f => {

@@ -83,12 +83,12 @@ test('heroic: shortcuts, launch detection, games', () => {
     // Heroic's Flatpak config folder gone: its prefixes simply aren't known.
     const flatConfigs = `${HOME}/.var/app/com.heroicgameslauncher.hgl/config/heroic/GamesConfig`;
     GLib.rename(flatConfigs, `${flatConfigs}.off`);
-    eq(h.launched(wine({WINEPREFIX: `${HOME}/Games/Heroic/Prefixes/Flat/pfx`})), false);
+    eq(h.launched(wine({WINEPREFIX: `${HOME}/Games/Heroic/Prefixes/Flat`})), false);
     GLib.rename(`${flatConfigs}.off`, flatConfigs);
-    eq(h.launched(wine({WINEPREFIX: `${HOME}/Games/Heroic/Prefixes/Flat/pfx`})), true);
+    eq(h.launched(wine({WINEPREFIX: `${HOME}/Games/Heroic/Prefixes/Flat`})), true);
     // Its files listed but unreadable (as if removed meanwhile): skipped.
     GLib.chmod(flatConfigs, 0o644);
-    eq(h.launched(wine({WINEPREFIX: `${HOME}/Games/Heroic/Prefixes/Flat/pfx`})), false);
+    eq(h.launched(wine({WINEPREFIX: `${HOME}/Games/Heroic/Prefixes/Flat`})), false);
     GLib.chmod(flatConfigs, 0o755);
 
     // No signal but the folder (no launcher known): a guess.
@@ -108,7 +108,7 @@ test('heroic: entry icons', () => {
     eq(short(h.entryIcon({exec: 'xdg-open heroic://launch/abc123'})), '~/.cache/icon-fix/exe-icons/<sha1>.png', 'from the .exe');
     eq(h.entryIcon({exec: 'xdg-open heroic://launch/nofolder'}), null, '.exe gone');
     eq(short(h.entryIcon({exec: 'xdg-open "heroic://launch?appName=abc123&runner=sideload"'})), '~/.cache/icon-fix/exe-icons/<sha1>.png');
-    eq(h.entryIcon({exec: 'xdg-open heroic://launch/1207'}), null, 'no .exe known');
+    eq(short(h.entryIcon({exec: 'xdg-open heroic://launch/1207'})), '~/.config/heroic/icons/1207.png', 'a cover, no .exe known');
     eq(h.entryIcon({exec: 'xdg-open heroic://launch/brokenexe'}), null, 'not a program');
     eq(h.entryIcon({exec: 'xdg-open heroic://launch/unknown'}), null);
     eq(h.entryIcon({exec: '/usr/bin/other'}), null);

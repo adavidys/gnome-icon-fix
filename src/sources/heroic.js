@@ -6,6 +6,8 @@
 // Wine prefix Heroic made for it (GamesConfig/<appName>.json), or by its
 // install folder from the stores' installed.json.
 
+import GdkPixbuf from 'gi://GdkPixbuf';
+
 import {guessPaths} from '../lib/matcher.js';
 import {exeInfo} from '../lib/peicon.js';
 import {
@@ -45,6 +47,14 @@ function iconOf(appName) {
         }
     }
     return null;
+}
+
+// Without a store icon (sideloaded games), Heroic saves the game's cover
+// there: a tall picture, squeezed in the dock. The .exe's own icon is
+// better then.
+function looksLikeIcon(path) {
+    const [, width, height] = GdkPixbuf.Pixbuf.get_file_info(path);
+    return Math.abs(Math.log(width / height)) < 0.25;
 }
 
 function decode(str) {
@@ -133,18 +143,32 @@ export class HeroicSource {
     entryIcon(entry) {
         const m = entry.exec?.match(LAUNCH);
         const appName = m && decode(m[1] ?? m[2]);
-        const game = appName && this._games().find(g => g.appName === appName);
-        return iconOf(appName) ?? (game?.exe && exists(game.exe) ? exeInfo(game.exe)?.icon ?? null : null);
+        return appName ? this._icon(appName, this._games().find(g => g.appName === appName)?.exe) : null;
     }
 
     fallback(ctx) {
         const game = this._game(ctx);
-        const icon = game && iconOf(game.appName);
+        // Heroic knows no icon: the other sources' come first.
+        const icon = game && iconOf(game.appName) ? this._icon(game.appName, game.exe) : null;
         return icon || game?.title ? {icon, name: game.title} : null;
     }
 
-    _games() {
-        return roots().flatMap(root => INSTALLED.flatMap(file => this._installed.get(`${root}/${file}`) ?? []));
+    // Heroic's icon for a game, unless it's a cover and its .exe has one;
+    // the .exe's when Heroic has none.
+    _icon(appName, exe) {
+        const saved = iconOf(appName);
+        if (saved && looksLikeIcon(saved))
+            return saved;
+        return (exe && exists(exe) ? exeInfo(exe)?.icon : null) ?? saved;
+    }
+
+    // Native Heroic's games first, or the Flatpak's: both may know the same
+    // game, in the same prefix.
+    _games(flatpakFirst = false) {
+        const all = roots();
+        if (flatpakFirst)
+            all.reverse();
+        return all.flatMap(root => INSTALLED.flatMap(file => this._installed.get(`${root}/${file}`) ?? []));
     }
 
     // The appNames whose Heroic prefix the process runs in (Proton's
@@ -169,7 +193,7 @@ export class HeroicSource {
         const where = guessPaths(ctx, this);
         let game = null;
         if (appName || inPrefix.length || where.length) {
-            const games = this._games();
+            const games = this._games(ctx.launcherSandbox === SANDBOX);
             const named = name => games.find(g => g.appName === name) ?? {appName: name, title: null};
             // Several games may share a prefix: then their folders decide.
             const candidates = inPrefix.length ? games.filter(g => inPrefix.includes(g.appName)) : games;

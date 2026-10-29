@@ -13,9 +13,11 @@ cp "$PE/png.exe" "$G/Some Game.exe"
 cp "$PE/pe32.exe" "$G/Tool \"Pro\".exe"
 cp "$PE/notpe.exe" "$G/Broken.exe"
 
-png() { python3 -c 'import sys,struct,zlib
+png() { # png FILE [HEIGHT]: a 4 px wide picture, 4 px high by default
+python3 -c 'import sys,struct,zlib
+h=int(sys.argv[1])
 def c(k,d): return struct.pack(">I",len(d))+k+d+struct.pack(">I",zlib.crc32(k+d)&0xffffffff)
-sys.stdout.buffer.write(b"\x89PNG\r\n\x1a\n"+c(b"IHDR",struct.pack(">IIBBBBB",4,4,8,6,0,0,0))+c(b"IDAT",zlib.compress(b"".join(b"\0"+b"\x10\x20\x30\xff"*4 for _ in range(4))))+c(b"IEND",b""))' > "$1"; }
+sys.stdout.buffer.write(b"\x89PNG\r\n\x1a\n"+c(b"IHDR",struct.pack(">IIBBBBB",4,h,8,6,0,0,0))+c(b"IDAT",zlib.compress(b"".join(b"\0"+b"\x10\x20\x30\xff"*4 for _ in range(h))))+c(b"IEND",b""))' "${2:-4}" > "$1"; }
 
 vdf_shortcuts() { # vdf_shortcuts FILE EXE [ICON]: one non-Steam game, app id 2236688360
 python3 - "$@" <<'EOF'
@@ -94,7 +96,8 @@ cat > "$H/sideload_apps/library.json" <<EOF
 {"games": [{"runner": "sideload", "app_name": "abc123", "title": "Some Game (Heroic)", "install": {"executable": "$G/Some Game.exe"}},
            {"runner": "sideload", "app_name": "nofolder", "title": "Nowhere", "install": {"executable": "/usr/bin/x"}},
            {"runner": "sideload", "app_name": "brokenexe", "title": "Broken", "install": {"executable": "$G/Broken.exe"}},
-           {"runner": "sideload", "title": "No Name"}]}
+           {"runner": "sideload", "title": "No Name"},
+           {"runner": "sideload", "app_name": "nat999", "title": "Some Game (Heroic, in the Flatpak's prefix)", "install": {"executable": "$G/Some Game.exe"}}]}
 EOF
 cat > "$H/legendaryConfig/legendary/installed.json" <<EOF
 {"epicgame": {"app_name": "epicgame", "title": "Epic Game", "install_path": "$F/Games/Epic/Epic Game", "executable": "EpicGame.exe"}}
@@ -105,9 +108,13 @@ printf '{"abc123": {"winePrefix": "%s/Games/Heroic/Prefixes/Some Game"}, "versio
 printf '{"epicgame": {"winePrefix": "%s/Games/Heroic/Prefixes/Shared"}}\n' "$F" > "$H/GamesConfig/epicgame.json"
 printf '{"1207": {"winePrefix": "%s/Games/Heroic/Prefixes/Shared"}}\n' "$F" > "$H/GamesConfig/1207.json"
 printf '{"amzn1": {}}\n' > "$H/GamesConfig/amzn1.json"
+# The Flatpak's prefix, as Proton's WINEPREFIX names it (Prefixes/Flat/pfx)
+printf '{"nat999": {"winePrefix": "%s/Games/Heroic/Prefixes/Flat/pfx"}}\n' "$F" > "$H/GamesConfig/nat999.json"
 printf 'not json' > "$H/GamesConfig/broken.json"
 ln -s "$F/nowhere.json" "$H/GamesConfig/gone.json"
 png "$H/icons/epicgame.jpg"
+# A cover Heroic saved instead of an icon, for a game without an .exe
+png "$H/icons/1207.png" 6
 
 # --- Heroic (Flatpak)
 HF=$F/.var/app/com.heroicgameslauncher.hgl/config/heroic
@@ -116,6 +123,9 @@ cat > "$HF/sideload_apps/library.json" <<EOF
 {"games": [{"runner": "sideload", "app_name": "flat999", "title": "Some Game (Heroic Flatpak)", "install": {"executable": "$G/Some Game.exe"}}]}
 EOF
 printf '{"flat999": {"winePrefix": "%s/Games/Heroic/Prefixes/Flat"}}\n' "$F" > "$HF/GamesConfig/flat999.json"
+# A cover Heroic saved instead of an icon: its .exe's icon goes first
+mkdir -p "$HF/icons"
+png "$HF/icons/flat999.png" 6
 
 # --- Lutris (native and Flatpak)
 mkdir -p "$F/.config/lutris/games" "$F/.local/share/lutris/games" "$F/Games/lutris-pfx" "$F/Games/Other Game" "$F/.local/share/icons/hicolor/128x128/apps"

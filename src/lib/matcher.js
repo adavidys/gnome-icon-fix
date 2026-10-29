@@ -119,29 +119,34 @@ function identify(index, sources, ctx) {
 }
 
 // hints: {wmClass, wmInstance, gtkId, sandboxId, launcherSandbox, proc}
-// Returns {primary, fallbacks}: primary is {id} of a desktop entry or null;
+// Returns {primary, fallbacks, launcher}: primary is {id} of a desktop entry or null;
 // fallbacks (only looked for without a primary) are what the sources would
 // show instead, best first: [{iconName?, icon?, name?, source}]. primary.by
 // says what found it (a source's name, or the kind of guess).
 // all: also look for fallbacks when there is a primary (the Debug tab
-// shows what else could have been used).
+// shows what else could have been used). launcher: the name of the source
+// whose launcher started the window, or null (for matchTitle()).
 export function matchWindow(index, sources, hints, all = false) {
     const ctx = windowContext(hints);
     ctx.launcher = sources.find(s =>
         (s.sandbox && s.sandbox === ctx.launcherSandbox) || tryCall(s, 'launched', ctx))?.name ?? null;
     const primary = identify(index, sources, ctx);
     if (primary && !all)
-        return {primary, fallbacks: []};
+        return {primary, fallbacks: [], launcher: ctx.launcher};
     return {
         primary,
         fallbacks: sources.flatMap(s => {
             const found = tryCall(s, 'fallback', ctx, index);
             return found ? [{...found, source: s.name}] : [];
         }),
+        launcher: ctx.launcher,
     };
 }
 
-export function matchTitle(index, title) {
+// launcher: as matchWindow() returns it. A game one launcher started
+// doesn't get another launcher's shortcut for it by its title either.
+export function matchTitle(index, title, launcher = null) {
     const id = index.name.get(normalize(title));
-    return id ? {id} : null;
+    const owner = id && index.owner.get(id);
+    return id && (!launcher || !owner || owner === launcher) ? {id} : null;
 }

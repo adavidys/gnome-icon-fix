@@ -72,7 +72,7 @@ test('matcher: windows with every launcher, with and without entries', () => {
             'flatpak steam, non-steam': 'steam_some.desktop',
             'heroic by env': 'heroic_some.desktop',
             'heroic by prefix': 'heroic_some.desktop',
-            'heroic flatpak': [["Some Game (Heroic Flatpak)",null,null],["Png Game","~/.cache/icon-fix/exe-icons/<sha1>.png",null]],
+            'heroic flatpak': [["Some Game (Heroic Flatpak)","~/.cache/icon-fix/exe-icons/<sha1>.png",null],["Png Game","~/.cache/icon-fix/exe-icons/<sha1>.png",null]],
             'lutris native': 'net.lutris.some-game-1.desktop',
             'lutris prefix only': 'net.lutris.some-game-1.desktop',
             'lutris flatpak': 'net.lutris.some-game-1.desktop',
@@ -101,7 +101,7 @@ test('matcher: windows with every launcher, with and without entries', () => {
             'flatpak steam, non-steam': [["Some Game","~/.cache/icon-fix/exe-icons/<sha1>.png",null],["Png Game","~/.cache/icon-fix/exe-icons/<sha1>.png",null]],
             'heroic by env': [["Some Game (Heroic)",null,null],["Png Game","~/.cache/icon-fix/exe-icons/<sha1>.png",null]],
             'heroic by prefix': [["Some Game (Heroic)",null,null],["Png Game","~/.cache/icon-fix/exe-icons/<sha1>.png",null]],
-            'heroic flatpak': [["Some Game (Heroic Flatpak)",null,null],["Png Game","~/.cache/icon-fix/exe-icons/<sha1>.png",null]],
+            'heroic flatpak': [["Some Game (Heroic Flatpak)","~/.cache/icon-fix/exe-icons/<sha1>.png",null],["Png Game","~/.cache/icon-fix/exe-icons/<sha1>.png",null]],
             'lutris native': [["Named In Lutris","~/.var/app/net.lutris.Lutris/data/icons/hicolor/128x128/apps/lutris_some-game.png","lutris_some-game"],["Png Game","~/.cache/icon-fix/exe-icons/<sha1>.png",null]],
             'lutris prefix only': [[null,"~/.var/app/net.lutris.Lutris/data/icons/hicolor/128x128/apps/lutris_some-game.png","lutris_some-game"],["Png Game","~/.cache/icon-fix/exe-icons/<sha1>.png",null]],
             'lutris flatpak': [[null,"~/.var/app/net.lutris.Lutris/data/icons/hicolor/128x128/apps/lutris_some-game.png","lutris_some-game"],["Png Game","~/.cache/icon-fix/exe-icons/<sha1>.png",null]],
@@ -137,6 +137,10 @@ test('matcher: titles and folder guesses', () => {
     eq(matchTitle(index, 'Window Title App'), {id: 'org.example.Titled.desktop'});
     eq(matchTitle(index, 'Something else'), null);
     eq(matchTitle(index, null), null);
+    // Another launcher's shortcut isn't taken for a game a launcher started.
+    eq(matchTitle(index, 'Some Game (Heroic)', 'heroic'), {id: 'heroic_some.desktop'});
+    eq(matchTitle(index, 'Some Game (Heroic)', 'bottles'), null);
+    eq(matchTitle(index, 'Window Title App', 'bottles'), {id: 'org.example.Titled.desktop'});
     const ctx = windowContext({proc: {pid: 0, argv: ['/a/b'], exe: '/a/b', cwd: '/c', env: {}}});
     eq(guessPaths(ctx, {name: 'x'}), ['/a/b', '/c']);
     ctx.launcher = 'y';
