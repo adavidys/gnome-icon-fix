@@ -1,4 +1,4 @@
-// Debug branch only: records how GNOME Shell decides which app (and so which
+// Records how GNOME Shell decides which app (and so which
 // name and icon) every window gets, for the Debug tab of the preferences
 // (debug/page.js).
 //

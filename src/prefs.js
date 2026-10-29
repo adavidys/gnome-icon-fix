@@ -102,7 +102,7 @@ export default class IconFixPreferences extends ExtensionPreferences {
         this.getSettings().bind('debug-logging', debugRow, 'active', Gio.SettingsBindFlags.DEFAULT);
         troubleshooting.add(debugRow);
 
-        // Debug branch: how GNOME picked each window's app, step by step.
+        // Debug tab: how GNOME picked each window's app, step by step.
         window.add(debugPage(window, this.getSettings()));
 
         const page = new Adw.PreferencesPage({

@@ -1,4 +1,4 @@
-// Debug branch only: the Debug tab of the preferences. Shows the trace
+// The Debug tab of the preferences. Shows the trace
 // debug/trace.js writes for the current GNOME Shell session, and follows it
 // while the window is open: for each window, the app GNOME gave it, every
 // step of that decision and what Icon Fix changed; then every place in the

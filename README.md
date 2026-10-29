@@ -89,7 +89,7 @@ The same goes for shortcuts with an empty `Icon=` or one that points nowhere: Ic
 
 ## Troubleshooting
 
-The **Debug** tab of the preferences shows, for every open window, how GNOME picked its app, name and icon step by step, what Icon Fix changed, and who in the Shell asks for icons (see [docs/gnome-app-tracking.md](docs/gnome-app-tracking.md)). It's recorded only while the preferences are open.
+The **Debug** tab of the preferences shows, for every open window, how GNOME picked its app, name and icon step by step, what Icon Fix changed, and who in the Shell asks for icons. It's recorded only while the preferences are open.
 
 Icon Fix writes errors to the system journal. Turn on **Debug logging** in its preferences to also see how each window was matched, which icons were replaced and what the shortcut options wrote:
 
