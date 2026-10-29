@@ -154,12 +154,21 @@ function windowFacts(win) {
     };
 }
 
+// An app a step found: enough to show it.
+function candidateFacts(app) {
+    if (!app)
+        return null;
+    return {id: app.get_id(), name: RAW.getName.call(app), icon: RAW.getIcon.call(app)?.to_string() ?? FALLBACK_ICON};
+}
+
 // get_app_for_window() of shell-window-tracker.c (GNOME Shell 50), step by
 // step, as a fresh decision. Each step: {step, tried, result, why}.
 export function replayDecision(win, tracker, appSys, seen = new Set()) {
     const steps = [];
-    const add = (step, tried, app, why) => {
-        steps.push({step, tried, result: app?.get_id() ?? null, why});
+    // app: what the step decided on; candidate: what it found, also when
+    // the tracker rejects it (for the icons in the Debug tab).
+    const add = (step, tried, app, why, candidate = app) => {
+        steps.push({step, tried, result: app?.get_id() ?? null, why, candidate: candidateFacts(candidate)});
         return app;
     };
     const done = (app, by) => ({steps, decided: app.get_id(), by});
@@ -203,7 +212,7 @@ export function replayDecision(win, tracker, appSys, seen = new Set()) {
             add(step, value, null, value ? 'no such entry' : 'window has none');
         } else if (prefix && !app.get_id().startsWith(prefix)) {
             add(step, value, null, `REJECTED ${app.get_id()}: the window is in the ${sandbox} sandbox and ` +
-                `only entries whose id starts with "${prefix}" count`);
+                `only entries whose id starts with "${prefix}" count`, app);
         } else {
             add(step, value, app, 'match');
             return done(app, step);
@@ -258,8 +267,9 @@ export function replayDecision(win, tracker, appSys, seen = new Set()) {
         ? 'not replayed: MetaGroup is not available to JavaScript' : 'Wayland window: no groups');
 
     // 7. Last resort.
-    add('window-backed app', null, null,
-        `GNOME makes an app out of the window itself: name = WM_CLASS, icon = ${FALLBACK_ICON}`);
+    steps.push({step: 'window-backed app', tried: null, result: windowBackedId(win),
+        why: `GNOME makes an app out of the window itself: name = WM_CLASS, icon = ${FALLBACK_ICON}`,
+        candidate: {id: windowBackedId(win), name: win.get_wm_class() ?? 'Unknown', icon: FALLBACK_ICON}});
     return {steps, decided: windowBackedId(win), by: 'window-backed app'};
 }
 

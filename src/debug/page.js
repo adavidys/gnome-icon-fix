@@ -11,6 +11,13 @@ import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk';
 import Pango from 'gi://Pango';
 
+// Gio.DesktopAppInfo moved to GioUnix in newer GLib.
+let DesktopAppInfo;
+try {
+    DesktopAppInfo = (await import('gi://GioUnix')).default.DesktopAppInfo;
+} catch {}
+DesktopAppInfo ??= Gio.DesktopAppInfo;
+
 // The same paths as debug/trace.js (which can't be imported here: it needs
 // GNOME Shell).
 const DIR = GLib.build_filenamev([GLib.get_user_cache_dir(), 'icon-fix', 'debug']);
@@ -85,12 +92,48 @@ function stepIcon(step, decided) {
     return icon('window-close-symbolic', ['error'], 'Nothing found');
 }
 
+// The app a step found (decided on or rejected): as the trace recorded it,
+// else looked up here by the id the step names (older records).
+function candidateOf(step) {
+    if (step.candidate)
+        return step.candidate;
+    const id = step.result ?? step.why.match(/^REJECTED (\S+\.desktop):/)?.[1];
+    if (!id || id.startsWith('window:'))
+        return null;
+    let info = null;
+    try {
+        info = DesktopAppInfo.new(id);
+    } catch {}
+    return info ? {id, name: info.get_name(), icon: info.get_icon()?.to_string() ?? 'application-x-executable'} : {id, name: id, icon: null};
+}
+
+// The icon of the app a step found, faded when it was passed over; an empty
+// slot when it found nothing.
+function candidateIcon(step, decided) {
+    const c = candidateOf(step);
+    if (!c)
+        return new Gtk.Image({icon_name: 'image-missing-symbolic', pixel_size: 28, opacity: 0.25, valign: Gtk.Align.CENTER, tooltip_text: 'No app found'});
+    let gicon = null;
+    try {
+        gicon = c.icon ? Gio.Icon.new_for_string(c.icon) : null;
+    } catch {}
+    return new Gtk.Image({
+        gicon: gicon ?? Gio.ThemedIcon.new('application-x-executable'), pixel_size: 28, valign: Gtk.Align.CENTER,
+        opacity: decided ? 1 : 0.45, tooltip_text: `${c.name} (${c.id})${decided ? '' : ': not used'}`,
+    });
+}
+
 function stepRow(step, decided) {
+    const c = candidateOf(step);
     const row = new Adw.ActionRow({
         title: GLib.markup_escape_text(step.step, -1),
-        subtitle: GLib.markup_escape_text(step.why, -1),
+        subtitle: GLib.markup_escape_text(c ? `${c.name} (${c.id}) · ${step.why}` : step.why, -1),
         subtitle_lines: 3,
     });
+    // add_prefix() puts each new prefix first: the mark ends up left of
+    // the app's icon. Notes don't look anything up: no icon for them.
+    if (!NOTES.has(step.step))
+        row.add_prefix(candidateIcon(step, decided));
     row.add_prefix(stepIcon(step, decided));
     if (step.tried !== null && step.tried !== undefined) {
         row.add_suffix(new Gtk.Label({
