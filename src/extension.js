@@ -74,7 +74,11 @@ export default class IconFixExtension extends Extension {
         }
 
         this._patch();
-        this._splitter = new WindowSplitter((win, splitter) => this._launcherGameApp(win, splitter));
+        // Windows GNOME made up an app for go to the entry the sources
+        // found (not one only the title matched: titles change).
+        this._splitter = new WindowSplitter((win, splitter, host) => host.is_window_backed()
+            ? this._backedEntry(host)
+            : this._launcherGameApp(win, splitter));
         this._refreshRunning();
 
         // The trace behind the Debug tab, while the preferences are open;
@@ -257,7 +261,8 @@ export default class IconFixExtension extends Extension {
             return this._entryIcon(app);
 
         const cached = this._cache.get(app);
-        const win = app.get_windows()[0];
+        // Its own window, also once moved to the game's entry (split.js).
+        const win = Shell.App.prototype.get_windows.call(app)[0];
         if (!win)
             return cached?.result ?? null;
 
@@ -390,11 +395,12 @@ export default class IconFixExtension extends Extension {
                 usesName: false, usesIcon: true, missing: false}] : [];
         }
         const sandbox = win.get_sandboxed_app_id();
+        const inLauncher = LAUNCHER_SANDBOXES.has(sandbox);
         const {primary, fallbacks} = matchWindow(this._index, this._sources, {
             wmClass: win.get_wm_class(),
             wmInstance: win.get_wm_class_instance(),
             gtkId: win.get_gtk_application_id(),
-            ...LAUNCHER_SANDBOXES.has(sandbox) ? {launcherSandbox: sandbox} : {sandboxId: sandbox},
+            ...inLauncher ? {launcherSandbox: sandbox} : {sandboxId: sandbox},
             proc: this._procInfo(win.get_pid()),
         }, true);
         const entry = (id, source) => {
@@ -405,11 +411,13 @@ export default class IconFixExtension extends Extension {
         // What is shown first: an entry (found by a source or a guess, or
         // by the title), then, as _fallback(), the first name and the
         // first icon the sources can show. The rest is listed as what
-        // could have been used.
-        const title = primary ? null : matchTitle(this._index, win.get_title());
+        // could have been used. A game in a launcher's sandbox isn't matched
+        // by its title (_launcherGameApp()): that could be another
+        // launcher's shortcut for it.
+        const title = primary || inLauncher ? null : matchTitle(this._index, win.get_title());
         const head = primary ? [entry(primary.id, primary.by)] : title ? [entry(title.id, 'window title')] : [];
         let nameTaken = head.length > 0, iconTaken = head.length > 0;
-        return [...head, ...fallbacks.map(f => {
+        const listed = [...head, ...fallbacks.map(f => {
             const shown = this._realize(f);
             const icon = toString(shown?.gicon);
             const out = {source: f.source, kind: 'fallback', name: f.name ?? null, icon: icon ?? f.icon ?? f.iconName ?? null,
@@ -418,6 +426,18 @@ export default class IconFixExtension extends Extension {
             iconTaken ||= out.usesIcon;
             return out;
         })];
+        // The game gets an entry of its own only with both a name and an
+        // icon; else its window stays with the launcher.
+        if (inLauncher && !head.length && !(nameTaken && iconTaken)) {
+            for (const c of listed)
+                c.usesName = c.usesIcon = false;
+        }
+        return listed;
+    }
+
+    _backedEntry(app) {
+        this._resolve(app);
+        return this._cache.get(app)?.primary?.app ?? null;
     }
 
     // For a window inside a launcher's Flatpak sandbox: the app of the game

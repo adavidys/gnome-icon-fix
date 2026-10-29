@@ -166,7 +166,8 @@ function iconFixStep(tracked, shown) {
     const icon = shown.get_icon()?.to_string() ?? FALLBACK_ICON;
     if (tracked !== shown) {
         return {step: 'Icon Fix', result: shown.get_id(), candidate: {id: shown.get_id(), name, icon},
-            why: `moved the window from ${tracked?.get_id() ?? '?'} (its launcher's sandbox) to the game's own entry`};
+            why: `moved the window from ${tracked?.get_id() ?? '?'} (${tracked?.is_window_backed()
+                ? 'an app GNOME made up for it' : 'its launcher\'s sandbox'}) to the game's own entry`};
     }
     const gnomeName = RAW.getName.call(shown);
     const gnomeIcon = RAW.getIcon.call(shown)?.to_string() ?? FALLBACK_ICON;

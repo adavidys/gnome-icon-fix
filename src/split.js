@@ -1,10 +1,12 @@
 // GNOME matches every window from a Flatpak sandbox to that sandbox's app,
 // whatever StartupWMClass says. For launchers from Flathub that means every
 // game shows up as "Steam" (or Heroic, Lutris, Bottles) in the dock and
-// Alt+Tab. The window tracker is C code we can't change, so, like Dash to
-// Dock does for its file manager locations, we move such windows over in
-// the JS layer everything reads from: get_running(), get_window_app() and
-// the windows/state/activation of the two apps involved.
+// Alt+Tab. And a game it can't match at all gets an app made up for its
+// window, apart from the game's entry pinned in the dock. The window
+// tracker is C code we can't change, so, like Dash to Dock does for its
+// file manager locations, we move such windows over in the JS layer
+// everything reads from: get_running(), get_window_app() and the
+// windows/state/activation of the two apps involved.
 
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
@@ -123,8 +125,9 @@ const APP_METHODS = [
 ];
 
 export class WindowSplitter {
-    // findApp(win, splitter): the Shell.App a launcher-sandboxed window
-    // really belongs to, or null to leave it with its launcher.
+    // findApp(win, splitter, host): the Shell.App a window GNOME gave to
+    // host (its launcher, or an app made up for it) really belongs to, or
+    // null to leave it there.
     constructor(findApp) {
         this._findApp = findApp;
         this._appSystem = Shell.AppSystem.get_default();
@@ -212,7 +215,7 @@ export class WindowSplitter {
     }
 
     _watch(win) {
-        if (!LAUNCHER_SANDBOXES.has(win.get_sandboxed_app_id()))
+        if (win.is_override_redirect())
             return;
         win.connectObject(
             'notify::wm-class', () => this._check(win),
@@ -221,11 +224,12 @@ export class WindowSplitter {
     }
 
     _check(win) {
-        if (!LAUNCHER_SANDBOXES.has(win.get_sandboxed_app_id()) || win.is_override_redirect())
+        if (win.is_override_redirect())
             return;
         const current = this._moved.get(win);
         const host = current?.host ?? this._tracker.get_window_app(win);
-        const app = this._findApp(win, this);
+        const app = host && (LAUNCHER_SANDBOXES.has(win.get_sandboxed_app_id()) || host.is_window_backed())
+            ? this._findApp(win, this, host) : null;
         if (!app || !host || app === host) {
             if (current)
                 this._release(win);
@@ -247,7 +251,7 @@ export class WindowSplitter {
     _release(win) {
         if (!this._moved.has(win))
             return;
-        log.debug(`window "${win.get_title()}" back to its launcher (closed or no longer matched)`);
+        log.debug(`window "${win.get_title()}" back to the app GNOME gave it (closed or no longer matched)`);
         this._moved.delete(win);
         this._queueRefresh();
     }
@@ -274,9 +278,11 @@ export class WindowSplitter {
         if (this._patched.has(app))
             return;
         this._patched.set(app, true);
-        const own = () => [...this._moved].filter(([, m]) => m.app === app).map(([w]) => w)
-            .sort((a, b) => b.get_user_time() - a.get_user_time());
         const original = saveOriginals(app);
+        // Its moved windows, and any GNOME gave it itself.
+        const own = () => [...new Set([...original.get_windows(),
+            ...[...this._moved].filter(([, m]) => m.app === app).map(([w]) => w)])]
+            .sort((a, b) => b.get_user_time() - a.get_user_time());
         const running = () => own().length > 0;
         const focus = (win, time) => {
             win ??= own()[0];
