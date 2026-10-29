@@ -150,10 +150,12 @@ function windowFacts(win) {
     };
 }
 
+const DIALOGS = new Set([Meta.WindowType.DIALOG, Meta.WindowType.MODAL_DIALOG]);
+
 // The windows worth listing: what the taskbar shows, and dialogs (their
 // app comes from their parent). Not menus, tooltips, notifications.
 function shown(win) {
-    return !win.is_override_redirect() && (!win.is_skip_taskbar() || !!win.get_transient_for());
+    return !win.is_override_redirect() && (!win.is_skip_taskbar() || DIALOGS.has(win.get_window_type()));
 }
 
 // What Icon Fix did on top of GNOME's answer, as one more step, or null.
@@ -304,6 +306,8 @@ export class Tracer {
         this._stacks = new Map();
         this._idles = new Set();
         this._windows = new Set();
+        // Windows traced while they had no title yet.
+        this._untitled = new Set();
         write({kind: 'enabled', shellPid: SHELL_PID, shell: Config.PACKAGE_VERSION,
             extensions: global.settings.get_strv('enabled-extensions')});
 
@@ -365,6 +369,7 @@ export class Tracer {
         for (const win of this._windows)
             win.disconnectObject(this);
         this._windows = null;
+        this._untitled = null;
         this._appSys.disconnectObject(this);
         this._tracker.disconnectObject(this);
         write({kind: 'disabled', callers: this._callerSummary()});
@@ -391,10 +396,17 @@ export class Tracer {
         win.connectObject(
             'notify::wm-class', () => this._later(() => this._traceWindow('wm-class-changed', win)),
             'notify::gtk-application-id', () => this._later(() => this._traceWindow('gtk-application-id-changed', win)),
+            // A window may get its title only after it appeared; later
+            // title changes (FPS counters...) don't matter.
+            'notify::title', () => {
+                if (this._untitled.delete(win))
+                    this._later(() => this._traceWindow('title-set', win));
+            },
             'unmanaged', () => {
                 write({kind: 'window-closed', window: win.get_id(), title: win.get_title()});
                 win.disconnectObject(this);
                 this._windows.delete(win);
+                this._untitled.delete(win);
                 this._later(() => this._writeOpen());
             }, this);
     }
@@ -430,6 +442,8 @@ export class Tracer {
     _traceWindow(event, win) {
         if (!win.get_display())
             return;
+        if (!win.get_title())
+            this._untitled.add(win);
         const replay = replayDecision(win, this._tracker, this._appSys);
         // What the tracker really holds for the window, and what the Shell
         // gets after Icon Fix moved it (split.js).
