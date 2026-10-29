@@ -117,9 +117,13 @@ function stepIcon(step, decided) {
         return icon('action-unavailable-symbolic', ['warning'], 'Found, but GNOME rejected it');
     if (step.result)
         return icon('action-unavailable-symbolic', ['dim-label'], 'GNOME\'s pick, changed by Icon Fix');
-    if (NOTES.has(step.step))
-        return icon('dialog-information-symbolic', ['dim-label'], 'Note');
-    return icon('window-close-symbolic', ['error'], 'Nothing found');
+    return icon('dialog-information-symbolic', ['dim-label'], 'Note');
+}
+
+// Whether a step is worth a row: a note, or one that found an app (used or
+// not). Lookups that found nothing are left out.
+function shownStep(step) {
+    return NOTES.has(step.step) || !!step.result || !!step.candidate || step.why.startsWith('REJECTED');
 }
 
 // The app a step found (decided on or rejected): as the trace recorded it,
@@ -226,7 +230,7 @@ function windowRow(record, closed) {
     row.add_row(textRow(facts.join('\n')));
     // One final pick: GNOME's, unless Icon Fix changed it.
     const gnomeWins = !record.iconFix;
-    for (const step of gnome.steps)
+    for (const step of gnome.steps.filter(shownStep))
         row.add_row(stepRow(step, gnomeWins && step.result && step.result === gnome.decided));
     if (record.iconFix)
         row.add_row(stepRow(record.iconFix, true));
@@ -338,8 +342,8 @@ export function debugPage(window, settings) {
         if (open_.length) {
             const group = addGroup(page, {title: 'Open windows',
                 description: 'How GNOME picked each window\'s app, and so its name and icon. ' +
-                    '✓ the final pick, ⊘ found but not used, ✗ nothing found, ⓘ a note; ' +
-                    'under Icon Fix, ★ what its name and icon come from and every other candidate. ' +
+                    'Only the steps that found an app are listed: ✓ the final pick, ⊘ found but not used, ⓘ a note; ' +
+                    'under Icon Fix, ★ what its name and icon come from and every other candidate (✗ its icon file is missing). ' +
                     '“Icon Fix” marks windows whose app, name or icon Icon Fix changed.'});
             for (const r of open_)
                 group.add(keep(windowRow(r, false), `w${r.window.id}`));
