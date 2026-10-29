@@ -116,7 +116,7 @@ function stepIcon(step, decided) {
     if (step.why.startsWith('REJECTED'))
         return icon('action-unavailable-symbolic', ['warning'], 'Found, but GNOME rejected it');
     if (step.result)
-        return icon('action-unavailable-symbolic', ['dim-label'], 'GNOME\'s pick, replaced by Icon Fix');
+        return icon('action-unavailable-symbolic', ['dim-label'], 'GNOME\'s pick, changed by Icon Fix');
     if (NOTES.has(step.step))
         return icon('dialog-information-symbolic', ['dim-label'], 'Note');
     return icon('window-close-symbolic', ['error'], 'Nothing found');
@@ -174,6 +174,31 @@ function stepRow(step, decided) {
     return row;
 }
 
+// One name or icon Icon Fix considered (debug/trace.js, extension.js
+// _explain()): ★ what the shown name or icon comes from, ⊘ passed over (a
+// better source came first), ✗ its icon file is gone.
+function candidateRow(c) {
+    const used = c.usesIcon || c.usesName;
+    const uses = [c.usesName && 'name', c.usesIcon && 'icon'].filter(Boolean).join(' and ');
+    const what = [c.name && `"${c.name}"`, c.icon].filter(Boolean).join(' · ') || 'nothing';
+    const row = new Adw.ActionRow({
+        title: GLib.markup_escape_text(`  ↳ ${c.source}${c.kind === 'entry' ? ` → ${c.id}` : ''}`, -1),
+        subtitle: GLib.markup_escape_text(`${what} · ${c.missing ? 'its icon can\'t be shown'
+            : used ? `shown: its ${uses}` : 'not used: a source before it gave one'}`, -1),
+        subtitle_lines: 3,
+    });
+    let gicon = null;
+    try {
+        gicon = c.icon && !c.missing ? Gio.Icon.new_for_string(c.icon) : null;
+    } catch {}
+    row.add_prefix(new Gtk.Image({gicon: gicon ?? Gio.ThemedIcon.new('image-missing-symbolic'), pixel_size: 28,
+        valign: Gtk.Align.CENTER, opacity: used ? 1 : 0.45, tooltip_text: c.icon ?? 'no icon'}));
+    row.add_prefix(c.missing ? icon('window-close-symbolic', ['error'], 'Icon file missing')
+        : used ? icon('starred-symbolic', ['accent'], 'Icon Fix takes it from here')
+            : icon('action-unavailable-symbolic', ['dim-label'], 'Not used'));
+    return row;
+}
+
 function windowRow(record, closed) {
     const {window: win, gnome, app, gnomeApp} = record;
     const name = app?.shownName ?? app?.name ?? gnome.decided;
@@ -182,7 +207,7 @@ function windowRow(record, closed) {
     const row = new Adw.ExpanderRow({
         title: GLib.markup_escape_text(win.title || win.wmClass || `window ${win.id}`, -1),
         subtitle: GLib.markup_escape_text(`window #${win.stableSequence ?? win.id} (${win.wmClass}) → ${name}` +
-            `${fixed ? ` (GNOME: ${gnomeName})` : ''} · decided by: ${record.moved ? 'Icon Fix' : gnome.by}` +
+            `${fixed ? ` (GNOME: ${gnomeName})` : ''} · decided by: ${record.iconFix ? 'Icon Fix' : gnome.by}` +
             `${closed ? ' · closed' : ''}`, -1),
     });
     row.add_prefix(appIcon(app));
@@ -199,12 +224,14 @@ function windowRow(record, closed) {
         `event: ${record.event} at ${time(record.t)}`,
     ];
     row.add_row(textRow(facts.join('\n')));
-    // GNOME's pick is the one shown unless Icon Fix moved the window.
-    const gnomeWins = !record.moved;
+    // One final pick: GNOME's, unless Icon Fix changed it.
+    const gnomeWins = !record.iconFix;
     for (const step of gnome.steps)
         row.add_row(stepRow(step, gnomeWins && step.result && step.result === gnome.decided));
     if (record.iconFix)
         row.add_row(stepRow(record.iconFix, true));
+    for (const c of record.candidates ?? [])
+        row.add_row(candidateRow(c));
     if (app) {
         const result = [
             `GNOME's app: ${gnome.tracked ?? gnome.decided}${app.id !== (gnome.tracked ?? gnome.decided) ? `   after Icon Fix: ${app.id}` : ''}`,
@@ -311,7 +338,8 @@ export function debugPage(window, settings) {
         if (open_.length) {
             const group = addGroup(page, {title: 'Open windows',
                 description: 'How GNOME picked each window\'s app, and so its name and icon. ' +
-                    '✓ decided, ⊘ found but rejected, ✗ nothing found, ⓘ a note. ' +
+                    '✓ the final pick, ⊘ found but not used, ✗ nothing found, ⓘ a note; ' +
+                    'under Icon Fix, ★ what its name and icon come from and every other candidate. ' +
                     '“Icon Fix” marks windows whose app, name or icon Icon Fix changed.'});
             for (const r of open_)
                 group.add(keep(windowRow(r, false), `w${r.window.id}`));

@@ -17,7 +17,7 @@ import {AppIndex, parseExec, tryCall} from './lib/appindex.js';
 import * as log from './lib/log.js';
 import {matchTitle, matchWindow} from './lib/matcher.js';
 import {readProcess} from './lib/process.js';
-import {findSandboxedIcon} from './lib/util.js';
+import {LAUNCHER_SANDBOXES, findSandboxedIcon} from './lib/util.js';
 import {FlatpakBottlesMirror} from './mirror/bottles-flatpak.js';
 import {FlatpakSteamMirror} from './mirror/steam-flatpak.js';
 import {createSources, envKeys} from './sources/registry.js';
@@ -87,7 +87,7 @@ export default class IconFixExtension extends Extension {
         const enabled = this._settings.get_boolean('debug-watching');
         if (enabled && !this._tracer) {
             try {
-                this._tracer = new Tracer();
+                this._tracer = new Tracer((win, app, moved) => this._explain(win, app, moved));
             } catch (e) {
                 log.error('debug trace', e);
                 return;
@@ -374,6 +374,50 @@ export default class IconFixExtension extends Extension {
         const gicon = shown.find(f => f.gicon)?.gicon ?? null;
         const name = shown.find(f => f.name)?.name ?? null;
         return {gicon, name, tag: `${gicon?.to_string()}\n${name}`};
+    }
+
+    // For the Debug tab: every name and icon Icon Fix considered for a
+    // window, with where it came from and whether it is the one shown:
+    // [{source, kind, id?, name, icon, usesName, usesIcon, missing}].
+    _explain(win, app, moved) {
+        if (!this._index || !app)
+            return [];
+        const toString = gicon => gicon?.to_string() ?? null;
+        // A desktop entry: only its icon can be replaced (_entryIcon()).
+        if (!moved && !app.is_window_backed()) {
+            const found = this._entryIcon(app);
+            return found ? [{source: 'entry icon', kind: 'icon', name: null, icon: toString(found.gicon),
+                usesName: false, usesIcon: true, missing: false}] : [];
+        }
+        const sandbox = win.get_sandboxed_app_id();
+        const {primary, fallbacks} = matchWindow(this._index, this._sources, {
+            wmClass: win.get_wm_class(),
+            wmInstance: win.get_wm_class_instance(),
+            gtkId: win.get_gtk_application_id(),
+            ...LAUNCHER_SANDBOXES.has(sandbox) ? {launcherSandbox: sandbox} : {sandboxId: sandbox},
+            proc: this._procInfo(win.get_pid()),
+        }, true);
+        const entry = (id, source) => {
+            const found = this._appSystem.lookup_app(id);
+            return {source, kind: 'entry', id, name: found?.get_name() ?? null, icon: toString(found?.get_icon()),
+                usesName: true, usesIcon: true, missing: !found};
+        };
+        // What is shown first: an entry (found by a source or a guess, or
+        // by the title), then, as _fallback(), the first name and the
+        // first icon the sources can show. The rest is listed as what
+        // could have been used.
+        const title = primary ? null : matchTitle(this._index, win.get_title());
+        const head = primary ? [entry(primary.id, primary.by)] : title ? [entry(title.id, 'window title')] : [];
+        let nameTaken = head.length > 0, iconTaken = head.length > 0;
+        return [...head, ...fallbacks.map(f => {
+            const shown = this._realize(f);
+            const icon = toString(shown?.gicon);
+            const out = {source: f.source, kind: 'fallback', name: f.name ?? null, icon: icon ?? f.icon ?? f.iconName ?? null,
+                usesName: !!f.name && !nameTaken, usesIcon: !!icon && !iconTaken, missing: !icon && !!(f.icon || f.iconName)};
+            nameTaken ||= out.usesName;
+            iconTaken ||= out.usesIcon;
+            return out;
+        })];
     }
 
     // For a window inside a launcher's Flatpak sandbox: the app of the game

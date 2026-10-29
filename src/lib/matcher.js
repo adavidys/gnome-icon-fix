@@ -85,7 +85,7 @@ function identify(index, sources, ctx) {
     for (const source of sources) {
         const found = tryCall(source, 'identify', ctx, index);
         if (found)
-            return found;
+            return {...found, by: source.name};
     }
 
     // A guess must not hand a game one launcher started to another
@@ -96,40 +96,47 @@ function identify(index, sources, ctx) {
         return !!id && (ctx.wine || owner !== 'wine') && (!ctx.launcher || (owner ?? ctx.launcher) === ctx.launcher);
     };
 
-    for (const key of [ctx.sandboxId, ctx.gtkId, ctx.wmClass, ctx.wmInstance]) {
+    for (const [key, by] of [[ctx.sandboxId, 'sandbox id'], [ctx.gtkId, 'GTK app id'],
+        [ctx.wmClass, 'window class'], [ctx.wmInstance, 'window instance']]) {
         const id = index.lookup(key);
         if (fits(id))
-            return {id};
+            return {id, by};
     }
 
     const exact = index.exactPath(ctx.paths);
     if (fits(exact))
-        return {id: exact};
+        return {id: exact, by: 'program path'};
 
     for (const stem of ctx.stems) {
         const id = index.lookup(stem);
         if (fits(id))
-            return {id};
+            return {id, by: 'program name'};
     }
 
     const near = index.nearestDir(ctx.cwd ? [...ctx.paths, ctx.cwd] : ctx.paths);
-    return fits(near) ? {id: near} : null;
+    return fits(near) ? {id: near, by: 'install folder'} : null;
 }
 
 // hints: {wmClass, wmInstance, gtkId, sandboxId, launcherSandbox, proc}
 // Returns {primary, fallbacks}: primary is {id} of a desktop entry or null;
 // fallbacks (only looked for without a primary) are what the sources would
-// show instead, best first: [{iconName?, icon?, name?}].
-export function matchWindow(index, sources, hints) {
+// show instead, best first: [{iconName?, icon?, name?, source}]. primary.by
+// says what found it (a source's name, or the kind of guess).
+// all: also look for fallbacks when there is a primary (the Debug tab
+// shows what else could have been used).
+export function matchWindow(index, sources, hints, all = false) {
     const ctx = windowContext(hints);
     ctx.launcher = sources.find(s =>
         (s.sandbox && s.sandbox === ctx.launcherSandbox) || tryCall(s, 'launched', ctx))?.name ?? null;
     const primary = identify(index, sources, ctx);
-    if (primary)
+    if (primary && !all)
         return {primary, fallbacks: []};
     return {
-        primary: null,
-        fallbacks: sources.map(s => tryCall(s, 'fallback', ctx, index)).filter(Boolean),
+        primary,
+        fallbacks: sources.flatMap(s => {
+            const found = tryCall(s, 'fallback', ctx, index);
+            return found ? [{...found, source: s.name}] : [];
+        }),
     };
 }
 

@@ -297,7 +297,9 @@ export function replayDecision(win, tracker, appSys, seen = new Set()) {
 }
 
 export class Tracer {
-    constructor() {
+    // explain(win, app, moved): what Icon Fix considered for a window.
+    constructor(explain = () => []) {
+        this._explain = explain;
         GLib.mkdir_with_parents(DIR, 0o755);
         clearTrace();
         this._tracker = Shell.WindowTracker.get_default();
@@ -439,6 +441,15 @@ export class Tracer {
             .sort((a, b) => b.count - a.count);
     }
 
+    _candidates(win, app, moved) {
+        try {
+            return this._explain(win, app, moved);
+        } catch (e) {
+            console.error(`Icon Fix debug: can't explain ${win.get_title()}: ${e}`);
+            return [];
+        }
+    }
+
     _traceWindow(event, win) {
         if (!win.get_display())
             return;
@@ -461,6 +472,7 @@ export class Tracer {
             // true: Icon Fix gave the window another app than GNOME did.
             moved: tracked !== shown,
             iconFix: iconFixStep(tracked, shown),
+            candidates: this._candidates(win, shown, tracked !== shown),
         });
     }
 
