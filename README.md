@@ -155,11 +155,12 @@ To support another launcher, add a file to `sources/` and list it in `sources/re
 
 | Command | What it does |
 |---|---|
-| `make pack` | Builds `dist/icon-fix@adavidys.shell-extension.zip` for [extensions.gnome.org](https://extensions.gnome.org/upload/) |
+| `make pack` | Builds `dist/icon-fix@adavidys.shell-extension.zip` for [extensions.gnome.org](https://extensions.gnome.org/upload/), replacing the previous one |
 | `make install` | Builds and installs the extension for the current user |
 | `make schemas` | Compiles the schema in `src/`, needed when `src/` is symlinked into the extensions folder |
 | `make uninstall` | Removes it |
-| `make clean` | Deletes `dist/` |
+| `make clean` | Deletes `dist/` and the compiled schema |
+| `make check` | Runs the tests, with code coverage |
 
 ## License
 
