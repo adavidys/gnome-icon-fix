@@ -16,10 +16,10 @@
       <summary>Write debug details to the system journal</summary>
       <description>Logs how each window was matched, which icons were replaced, what the shortcut mirrors wrote and how long it took, prefixed "Icon Fix:". Errors are logged either way.</description>
     </key>
-    <key name="debug-trace" type="b">
-      <default>true</default>
-      <summary>Record how GNOME picks each window's app (debug branch)</summary>
-      <description>Writes ~/.cache/icon-fix/debug/trace.jsonl for the Debug tab of the preferences: each window's app, every step of GNOME's decision, what Icon Fix changed, and who in the Shell asks for icons and names.</description>
+    <key name="debug-watching" type="b">
+      <default>false</default>
+      <summary>The preferences window is open (internal)</summary>
+      <description>Set by the preferences while they are open: Icon Fix then records how GNOME picks each window's app for the Debug tab, in ~/.cache/icon-fix/debug/trace.jsonl, and removes it when they close.</description>
     </key>
   </schema>
 </schemalist>

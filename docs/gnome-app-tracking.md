@@ -32,5 +32,4 @@ Open it from Extensions (or `gnome-extensions prefs icon-trace@adavidys`). It sh
 
 ## Seeing it
 
-On the debug branch, the **Debug** tab of Icon Fix's preferences shows this for every window of the current session: each step, what GNOME decided, what Icon Fix changed, and every place in the Shell that asked for a window's app or an app's icon or name, with its stack. The trace is written by `src/debug/trace.js` to `~/.cache/icon-fix/debug/trace.jsonl`.
-
+The **Debug** tab of Icon Fix's preferences shows this for every open window: each step, what GNOME decided, what Icon Fix changed, and every place in the Shell that asked for a window's app or an app's icon or name, with its stack. Icon Fix records it (`src/debug/trace.js`, into `~/.cache/icon-fix/debug/trace.jsonl`) only while the preferences window is open, and removes it when the window closes.

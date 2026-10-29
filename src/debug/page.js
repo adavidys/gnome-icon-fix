@@ -32,21 +32,49 @@ const METHODS = {
     get_name: 'App name (App.get_name)',
 };
 
-function readLog() {
-    let text = '';
-    try {
-        text = new TextDecoder().decode(GLib.file_get_contents(LOG)[1]);
-    } catch {
-        return [];
+// Reads the log as it grows: only the lines added since the last call, and
+// the whole of it again when it was started over.
+class LogReader {
+    constructor() {
+        this.records = [];
+        this._offset = 0;
+        this._partial = '';
+        this._decoder = new TextDecoder();
     }
-    const records = [];
-    for (const line of text.split('\n')) {
+
+    update() {
+        let stream;
         try {
-            if (line)
-                records.push(JSON.parse(line));
-        } catch {}
+            stream = Gio.File.new_for_path(LOG).read(null);
+        } catch {
+            this._reset();
+            return;
+        }
+        try {
+            const size = stream.query_info('standard::size', null).get_size();
+            if (size < this._offset)
+                this._reset();
+            stream.seek(this._offset, GLib.SeekType.SET, null);
+            const bytes = stream.read_bytes(size - this._offset, null).toArray();
+            this._offset += bytes.length;
+            const lines = (this._partial + this._decoder.decode(bytes)).split('\n');
+            this._partial = lines.pop();
+            for (const line of lines) {
+                try {
+                    if (line)
+                        this.records.push(JSON.parse(line));
+                } catch {}
+            }
+        } finally {
+            stream.close(null);
+        }
     }
-    return records;
+
+    _reset() {
+        this.records = [];
+        this._offset = 0;
+        this._partial = '';
+    }
 }
 
 function time(t) {
@@ -212,14 +240,9 @@ function callerRow(caller, count) {
 export function debugPage(window, settings) {
     const page = new Adw.PreferencesPage({title: 'Debug', icon_name: 'utilities-terminal-symbolic'});
 
-    const switchGroup = new Adw.PreferencesGroup();
-    const traceRow = new Adw.SwitchRow({
-        title: 'Record the trace',
-        subtitle: `How GNOME picks each window's app, and who asks for icons. Written to ${LOG}`,
-    });
-    settings.bind('debug-trace', traceRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-    switchGroup.add(traceRow);
-    page.add(switchGroup);
+    // Icon Fix traces while this window is open, from now on.
+    const reader = new LogReader();
+    settings.set_boolean('debug-watching', true);
 
     // Groups are rebuilt on every change of the log; rows the user opened
     // stay open.
@@ -244,7 +267,8 @@ export function debugPage(window, settings) {
 
     const refresh = () => {
         clear();
-        const records = readLog();
+        reader.update();
+        const records = reader.records;
         const start = records.find(r => r.kind === 'enabled');
 
         const session = addGroup(page, {
@@ -252,7 +276,7 @@ export function debugPage(window, settings) {
             description: start
                 ? `GNOME Shell ${start.shell ?? ''}, process ${start.shellPid}, traced since ${time(start.t)}. ` +
                   `${records.length} records in ${LOG}`
-                : `Nothing recorded yet. Is the debug trace on and Icon Fix enabled? (${LOG})`,
+                : `Waiting for GNOME Shell… Is Icon Fix enabled? (${LOG})`,
         });
         const dump = new Gtk.Button({label: 'Snapshot now', valign: Gtk.Align.CENTER,
             tooltip_text: 'Ask the Shell to record every open window and running app now'});
@@ -322,9 +346,6 @@ export function debugPage(window, settings) {
                 group.add(keep(callerRow(c, counts.get(`${c.method}\n${c.stack.slice(1, 3).join(' ← ')}`)), `c${c.method}${c.stack.join()}`));
         }
     };
-    // A fresh list of the open windows when the tab opens.
-    GLib.mkdir_with_parents(DIR, 0o755);
-    GLib.file_set_contents(DUMP, String(Date.now()));
     refresh();
 
     // Follow the log while the window is open.
@@ -344,6 +365,9 @@ export function debugPage(window, settings) {
         monitor.cancel();
         if (timeoutId)
             GLib.source_remove(timeoutId);
+        // Icon Fix stops tracing and removes the log.
+        settings.set_boolean('debug-watching', false);
+        reader.records = [];
         return false;
     });
     return page;

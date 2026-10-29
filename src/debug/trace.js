@@ -11,9 +11,9 @@
 // icon theme can show that icon. It also records every JavaScript caller
 // that asks for an app's icon or name or a window's app, with its stack.
 //
-// Output, one JSON object per line: ~/.cache/icon-fix/debug/trace.jsonl, for
-// the current GNOME Shell session only (the previous session's is moved to
-// trace.jsonl.old, and so is a log past 20 MB). Write anything to
+// Runs only while the preferences window is open (it sets debug-watching),
+// writing one JSON object per line to ~/.cache/icon-fix/debug/trace.jsonl;
+// the file is removed when the window closes. Write anything to
 // ~/.cache/icon-fix/debug/dump to get a full dump of all windows.
 
 import Gio from 'gi://Gio';
@@ -36,7 +36,6 @@ const STACK_FRAMES = 8;
 const FALLBACK_ICON = 'application-x-executable';
 
 const encoder = new TextEncoder();
-const decoder = new TextDecoder();
 
 // GNOME's own methods, taken when this module is first loaded: before Icon
 // Fix (or the splitter) replaces them, so the trace can tell what GNOME
@@ -51,29 +50,26 @@ const RAW = {
 // Frames of Icon Fix itself (this file, its patched methods) aren't callers.
 const OWN_FILES = import.meta.url.replace(/\/debug\/trace\.js$/, '/');
 
-// The Shell process: a new one is a new session. The extension is also
-// disabled and enabled again around a locked screen, which isn't.
+// The Shell process, shown in the Debug tab.
 const SHELL_PID = Gio.Credentials.new().get_unix_pid();
 
-// Starts the log of this session, keeping the last session's as .old.
-function startSession() {
-    const file = Gio.File.new_for_path(LOG);
-    let first = null;
-    try {
-        const stream = Gio.DataInputStream.new(file.read(null));
-        first = JSON.parse(decoder.decode(stream.read_line(null)[0] ?? new Uint8Array()) || 'null');
-        stream.close(null);
-    } catch {}
-    if (first && first.shellPid !== SHELL_PID)
-        file.move(Gio.File.new_for_path(`${LOG}.old`), Gio.FileCopyFlags.OVERWRITE, null, null);
+// Removes the trace: it only exists while the preferences show it.
+export function clearTrace() {
+    // .old: left by older builds.
+    for (const path of [LOG, `${LOG}.old`, DUMP]) {
+        try {
+            Gio.File.new_for_path(path).delete(null);
+        } catch {}
+    }
 }
 
 function write(record) {
     try {
         const file = Gio.File.new_for_path(LOG);
+        // A runaway trace (the window left open for days) starts over.
         try {
             if (file.query_info('standard::size', Gio.FileQueryInfoFlags.NONE, null).get_size() > MAX_LOG_BYTES)
-                file.move(Gio.File.new_for_path(`${LOG}.old`), Gio.FileCopyFlags.OVERWRITE, null, null);
+                file.delete(null);
         } catch {}
         const stream = file.append_to(Gio.FileCreateFlags.NONE, null);
         stream.write_all(encoder.encode(`${JSON.stringify({t: Date.now(), ...record})}\n`), null);
@@ -152,6 +148,12 @@ function windowFacts(win) {
         transientFor: win.get_transient_for()?.get_id() ?? null,
         skipTaskbar: win.is_skip_taskbar(),
     };
+}
+
+// The windows worth listing: what the taskbar shows, and dialogs (their
+// app comes from their parent). Not menus, tooltips, notifications.
+function shown(win) {
+    return !win.is_override_redirect() && (!win.is_skip_taskbar() || !!win.get_transient_for());
 }
 
 // What Icon Fix did on top of GNOME's answer, as one more step, or null.
@@ -295,11 +297,7 @@ export function replayDecision(win, tracker, appSys, seen = new Set()) {
 export class Tracer {
     constructor() {
         GLib.mkdir_with_parents(DIR, 0o755);
-        try {
-            startSession();
-        } catch (e) {
-            console.error(`Icon Fix debug: can't start the session log: ${e}`);
-        }
+        clearTrace();
         this._tracker = Shell.WindowTracker.get_default();
         this._appSys = Shell.AppSystem.get_default();
         this._theme = new St.IconTheme();
@@ -331,7 +329,8 @@ export class Tracer {
             // The tracker decides in its own window-created handler; look
             // once everything has settled.
             this._later(() => {
-                this._traceWindow('window-created', win);
+                if (shown(win))
+                    this._traceWindow('window-created', win);
                 this._writeOpen();
             });
         }, this);
@@ -403,8 +402,7 @@ export class Tracer {
     // The windows open right now, so the Debug tab lists exactly those
     // (windows closed while the trace was off never get a window-closed).
     _shownWindows() {
-        return global.get_window_actors().map(a => a.meta_window)
-            .filter(w => w.get_window_type() === Meta.WindowType.NORMAL || w.get_transient_for());
+        return global.get_window_actors().map(a => a.meta_window).filter(shown);
     }
 
     _writeOpen() {
