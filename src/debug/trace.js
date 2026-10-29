@@ -154,6 +154,25 @@ function windowFacts(win) {
     };
 }
 
+// What Icon Fix did on top of GNOME's answer, as one more step, or null.
+function iconFixStep(tracked, shown) {
+    if (!shown)
+        return null;
+    const name = shown.get_name();
+    const icon = shown.get_icon()?.to_string() ?? FALLBACK_ICON;
+    if (tracked !== shown) {
+        return {step: 'Icon Fix', result: shown.get_id(), candidate: {id: shown.get_id(), name, icon},
+            why: `moved the window from ${tracked?.get_id() ?? '?'} (its launcher's sandbox) to the game's own entry`};
+    }
+    const gnomeName = RAW.getName.call(shown);
+    const gnomeIcon = RAW.getIcon.call(shown)?.to_string() ?? FALLBACK_ICON;
+    if (name === gnomeName && icon === gnomeIcon)
+        return null;
+    return {step: 'Icon Fix', result: shown.get_id(), candidate: {id: shown.get_id(), name, icon},
+        why: `kept GNOME's app but shows ${name !== gnomeName ? `the name "${name}"` : ''}` +
+            `${name !== gnomeName && icon !== gnomeIcon ? ' and ' : ''}${icon !== gnomeIcon ? `the icon ${icon}` : ''}`};
+}
+
 // An app a step found: enough to show it.
 function candidateFacts(app) {
     if (!app)
@@ -311,7 +330,10 @@ export class Tracer {
             this._watch(win);
             // The tracker decides in its own window-created handler; look
             // once everything has settled.
-            this._later(() => this._traceWindow('window-created', win));
+            this._later(() => {
+                this._traceWindow('window-created', win);
+                this._writeOpen();
+            });
         }, this);
         for (const actor of global.get_window_actors())
             this._watch(actor.meta_window);
@@ -374,7 +396,19 @@ export class Tracer {
                 write({kind: 'window-closed', window: win.get_id(), title: win.get_title()});
                 win.disconnectObject(this);
                 this._windows.delete(win);
+                this._later(() => this._writeOpen());
             }, this);
+    }
+
+    // The windows open right now, so the Debug tab lists exactly those
+    // (windows closed while the trace was off never get a window-closed).
+    _shownWindows() {
+        return global.get_window_actors().map(a => a.meta_window)
+            .filter(w => w.get_window_type() === Meta.WindowType.NORMAL || w.get_transient_for());
+    }
+
+    _writeOpen() {
+        write({kind: 'open-windows', windows: this._shownWindows().map(w => w.get_id())});
     }
 
     _caller(method, describe) {
@@ -414,15 +448,14 @@ export class Tracer {
             agrees: replay.decided === tracked?.get_id(),
             // true: Icon Fix gave the window another app than GNOME did.
             moved: tracked !== shown,
+            iconFix: iconFixStep(tracked, shown),
         });
     }
 
     _dump() {
-        for (const actor of global.get_window_actors()) {
-            const win = actor.meta_window;
-            if (win.get_window_type() === Meta.WindowType.NORMAL || win.get_transient_for())
-                this._traceWindow('dump', win);
-        }
+        for (const win of this._shownWindows())
+            this._traceWindow('dump', win);
+        this._writeOpen();
         write({
             kind: 'running',
             apps: this._appSys.get_running().map(app => ({...appFacts(app, this._theme),

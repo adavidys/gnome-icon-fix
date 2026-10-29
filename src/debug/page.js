@@ -87,6 +87,8 @@ function stepIcon(step, decided) {
         return icon('object-select-symbolic', ['success'], 'Decided');
     if (step.why.startsWith('REJECTED'))
         return icon('action-unavailable-symbolic', ['warning'], 'Found, but GNOME rejected it');
+    if (step.result)
+        return icon('action-unavailable-symbolic', ['dim-label'], 'GNOME\'s pick, replaced by Icon Fix');
     if (NOTES.has(step.step))
         return icon('dialog-information-symbolic', ['dim-label'], 'Note');
     return icon('window-close-symbolic', ['error'], 'Nothing found');
@@ -151,7 +153,8 @@ function windowRow(record, closed) {
     const gnomeName = gnomeApp?.name ?? app?.name ?? gnome.decided;
     const row = new Adw.ExpanderRow({
         title: GLib.markup_escape_text(win.title || win.wmClass || `window ${win.id}`, -1),
-        subtitle: GLib.markup_escape_text(`→ ${name}${fixed ? ` (GNOME: ${gnomeName})` : ''} · decided by: ${gnome.by}` +
+        subtitle: GLib.markup_escape_text(`window #${win.stableSequence ?? win.id} (${win.wmClass}) → ${name}` +
+            `${fixed ? ` (GNOME: ${gnomeName})` : ''} · decided by: ${record.moved ? 'Icon Fix' : gnome.by}` +
             `${closed ? ' · closed' : ''}`, -1),
     });
     row.add_prefix(appIcon(app));
@@ -168,8 +171,12 @@ function windowRow(record, closed) {
         `event: ${record.event} at ${time(record.t)}`,
     ];
     row.add_row(textRow(facts.join('\n')));
+    // GNOME's pick is the one shown unless Icon Fix moved the window.
+    const gnomeWins = !record.moved;
     for (const step of gnome.steps)
-        row.add_row(stepRow(step, step.result && step.result === gnome.decided));
+        row.add_row(stepRow(step, gnomeWins && step.result && step.result === gnome.decided));
+    if (record.iconFix)
+        row.add_row(stepRow(record.iconFix, true));
     if (app) {
         const result = [
             `GNOME's app: ${gnome.tracked ?? gnome.decided}${app.id !== (gnome.tracked ?? gnome.decided) ? `   after Icon Fix: ${app.id}` : ''}`,
@@ -259,17 +266,24 @@ export function debugPage(window, settings) {
         header.append(dump);
         session.set_header_suffix(header);
 
-        // The latest record of each window; closed ones after open ones.
+        // The latest record of each window. Open: the windows the Shell last
+        // listed as open (older traces: those without a window-closed);
+        // every other window is closed.
         const latest = new Map();
         const closed = new Set();
+        let openNow = null;
         for (const r of records) {
             if (r.kind === 'window')
                 latest.set(r.window.id, r);
             else if (r.kind === 'window-closed')
                 closed.add(r.window);
+            else if (r.kind === 'open-windows')
+                openNow = new Set(r.windows);
         }
-        const open_ = [...latest.values()].filter(r => !closed.has(r.window.id)).reverse();
-        const gone = [...latest.values()].filter(r => closed.has(r.window.id)).reverse();
+        const isOpen = r => openNow ? openNow.has(r.window.id) : !closed.has(r.window.id);
+        const byTitle = (a, b) => (a.window.title ?? '').localeCompare(b.window.title ?? '');
+        const open_ = [...latest.values()].filter(isOpen).sort(byTitle);
+        const gone = [...latest.values()].filter(r => !isOpen(r)).reverse();
         if (open_.length) {
             const group = addGroup(page, {title: 'Open windows',
                 description: 'How GNOME picked each window\'s app, and so its name and icon. ' +
@@ -308,6 +322,9 @@ export function debugPage(window, settings) {
                 group.add(keep(callerRow(c, counts.get(`${c.method}\n${c.stack.slice(1, 3).join(' ← ')}`)), `c${c.method}${c.stack.join()}`));
         }
     };
+    // A fresh list of the open windows when the tab opens.
+    GLib.mkdir_with_parents(DIR, 0o755);
+    GLib.file_set_contents(DUMP, String(Date.now()));
     refresh();
 
     // Follow the log while the window is open.
