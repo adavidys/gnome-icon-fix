@@ -27,7 +27,7 @@ When several entries have the same `StartupWMClass`, the one whose id equals the
 
 Open it from Extensions (or `gnome-extensions prefs icon-trace@adavidys`). It shows the log of the **current GNOME Shell session** and follows it live:
 
-- **Windows**: every window with the app GNOME gave it. Expand one for the facts GNOME looked at, each step of the decision that found an app (✓ decided, ⊘ found but not used; lookups that found nothing are left out), and where the name and icon come from and what is drawn. *Snapshot now* records every open window again.
+- **Windows**: every window with the app GNOME gave it. Expand one for the facts GNOME looked at, each step of the decision that found an app (✓ decided, ⊘ found but not used; lookups that found nothing are left out), and where the name and icon come from and what is drawn. *Snapshot now* records every open window again; the copy button (Copy JSON) copies the whole trace to the clipboard.
 - **Who asks**: every place in the Shell that asked for a window's app, an app's icon or name, grouped by what it asked; expand one for its full JavaScript stack.
 
 ## Seeing it

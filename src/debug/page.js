@@ -316,8 +316,15 @@ export function debugPage(window, settings) {
             css_classes: ['flat'], tooltip_text: 'Show the log in Files'});
         open.connect('clicked', () => new Gtk.FileLauncher({file: Gio.File.new_for_path(LOG)})
             .open_containing_folder(window, null, null));
+        const copy = new Gtk.Button({icon_name: 'edit-copy-symbolic', valign: Gtk.Align.CENTER, css_classes: ['flat'], sensitive: records.length > 0,
+            tooltip_text: 'Copy JSON: every record of this trace, as a JSON array'});
+        copy.connect('clicked', () => {
+            window.get_clipboard().set(JSON.stringify(reader.records, null, 2));
+            window.add_toast(new Adw.Toast({title: `${reader.records.length} records copied`, timeout: 2}));
+        });
         const header = new Gtk.Box({spacing: 6});
         header.append(open);
+        header.append(copy);
         header.append(dump);
         session.set_header_suffix(header);
 
