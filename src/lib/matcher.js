@@ -96,9 +96,10 @@ function identify(index, sources, ctx) {
         return !!id && (ctx.wine || owner !== 'wine') && (!ctx.launcher || (owner ?? ctx.launcher) === ctx.launcher);
     };
 
-    for (const [key, by] of [[ctx.sandboxId, 'sandbox id'], [ctx.gtkId, 'GTK app id'],
-        [ctx.wmClass, 'window class'], [ctx.wmInstance, 'window instance']]) {
-        const id = index.lookup(key);
+    const keys = {'sandbox id': ctx.sandboxId, 'GTK app id': ctx.gtkId,
+        'window class': ctx.wmClass, 'window instance': ctx.wmInstance};
+    for (const by in keys) {
+        const id = index.lookup(keys[by]);
         if (fits(id))
             return {id, by};
     }

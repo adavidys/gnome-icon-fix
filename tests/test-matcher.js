@@ -143,3 +143,16 @@ test('matcher: titles and folder guesses', () => {
     eq(guessPaths(ctx, {name: 'x'}), []);
     eq(guessPaths(ctx, {name: 'y'}), ['/a/b', '/c']);
 });
+
+test('matcher: what found an entry, and every fallback with its source', () => {
+    const sources = createSources();
+    const index = new AppIndex(ENTRIES, sources);
+    const by = name => matchWindow(index, sources, CASES.find(([n]) => n === name)[1]).primary?.by ?? null;
+    eq(['steam game by env', 'native by sandbox id', 'native by gtk id', 'native by class', 'native by instance',
+        'native by exact path', 'flatpak app argv', 'native by folder', 'nothing known'].map(by),
+    ['steam', 'sandbox id', 'GTK app id', 'window class', 'window instance', 'program path', 'program name', 'install folder', null]);
+    const all = matchWindow(index, sources, CASES.find(([n]) => n === 'heroic by env')[1], true);
+    eq(all.primary.id, 'heroic_some.desktop');
+    eq(all.fallbacks.map(f => f.source), ['heroic', 'exe'], 'fallbacks even with an entry');
+    eq(matchWindow(index, sources, CASES.find(([n]) => n === 'heroic by env')[1]).fallbacks, [], 'not by default');
+});
