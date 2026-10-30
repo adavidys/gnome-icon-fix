@@ -13,7 +13,7 @@ import Gtk from 'gi://Gtk';
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 import {debugPage} from './debug/page.js';
-import {KINDS, normalizeOrder} from './lib/look.js';
+import {normalizeOrder} from './lib/look.js';
 import * as bottlesMirror from './mirror/bottles-flatpak.js';
 import * as steamMirror from './mirror/steam-flatpak.js';
 
@@ -237,7 +237,7 @@ export default class IconFixPreferences extends ExtensionPreferences {
         });
         const reset = new Gtk.Button({
             icon_name: 'edit-undo-symbolic', valign: Gtk.Align.CENTER, css_classes: ['flat'],
-            tooltip_text: 'Back to the usual order',
+            tooltip_text: 'Back to the default order',
         });
         reset.connect('clicked', () => settings.reset(key));
         group.set_header_suffix(reset);
@@ -247,7 +247,7 @@ export default class IconFixPreferences extends ExtensionPreferences {
         const fill = () => {
             list.remove_all();
             const order = normalizeOrder(settings.get_strv(key));
-            reset.sensitive = order.join() !== KINDS.join();
+            reset.sensitive = order.join() !== normalizeOrder(settings.get_default_value(key).deep_unpack()).join();
             const move = (kind, to) => {
                 const next = order.filter(k => k !== kind);
                 next.splice(to, 0, kind);

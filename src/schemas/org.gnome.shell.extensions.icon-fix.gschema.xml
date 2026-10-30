@@ -17,7 +17,7 @@
       <description>For windows GNOME can't place by itself: "desktop" is the icon of the game's .desktop file (or the one its launcher keeps), "exe" the icon inside its Windows program, "default" what GNOME shows by itself. The first one there is is used; nothing after "default" ever is.</description>
     </key>
     <key name="name-order" type="as">
-      <default>['desktop', 'exe', 'default']</default>
+      <default>['exe', 'desktop', 'default']</default>
       <summary>Where a game's name comes from, first choice first</summary>
       <description>As icon-order, for the name: the Name of the game's .desktop file (or its launcher's title for it), the product name inside its Windows program (else its file name), or GNOME's own.</description>
     </key>
