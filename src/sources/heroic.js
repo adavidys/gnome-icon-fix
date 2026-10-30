@@ -8,18 +8,18 @@
 
 import GdkPixbuf from 'gi://GdkPixbuf';
 
-import {guessPaths} from '../lib/matcher.js';
-import {exeInfo} from '../lib/peicon.js';
+import {exeIcon} from '../lib/peicon.js';
 import {
-    StampCache, basename, canonical, configDir, exists, home, isSpecificDir, isUnder, listDir, pathKey, readJson,
+    FolderCache, StampCache, basename, canonical, configDir, exists, isSpecificDir, pathKey, readJson, sandboxDir,
 } from '../lib/util.js';
+import {LauncherSource} from './launcher.js';
 
 const SANDBOX = 'com.heroicgameslauncher.hgl';
 
 function roots() {
     return [
         configDir('heroic'),
-        home('.var', 'app', SANDBOX, 'config', 'heroic'),
+        sandboxDir(SANDBOX, 'config', 'heroic'),
     ];
 }
 
@@ -37,8 +37,6 @@ const LAUNCH = /heroic:\/\/launch(?:\/(?:(?:legendary|gog|nile|sideload)\/)?([^\
 
 // Where Heroic saves the icons it uses for its shortcuts.
 function iconOf(appName) {
-    if (!appName)
-        return null;
     for (const root of roots()) {
         for (const ext of ['png', 'jpg', 'jpeg', 'webp']) {
             const path = `${root}/icons/${appName}.${ext}`;
@@ -53,8 +51,8 @@ function iconOf(appName) {
 // there: a tall picture, squeezed in the dock. The .exe's own icon is
 // better then.
 function looksLikeIcon(path) {
-    const [, width, height] = GdkPixbuf.Pixbuf.get_file_info(path);
-    return Math.abs(Math.log(width / height)) < 0.25;
+    const info = GdkPixbuf.Pixbuf.get_file_info(path);
+    return Math.abs(Math.log(info[1] / info[2])) < 0.25;
 }
 
 function decode(str) {
@@ -63,6 +61,12 @@ function decode(str) {
     } catch {
         return str;
     }
+}
+
+// The appName a shortcut launches, or null.
+function launchedApp(entry) {
+    const m = entry.exec?.match(LAUNCH);
+    return m ? decode(m[1] ?? m[2]) : null;
 }
 
 // The stores' files differ in shape:
@@ -103,25 +107,25 @@ export function gamePrefix(appName, json) {
     return prefix ? pathKey(prefix) : null;
 }
 
-export class HeroicSource {
+export class HeroicSource extends LauncherSource {
     constructor() {
-        this.name = 'heroic';
-        this.sandbox = SANDBOX;
-        this.envKeys = ['HEROIC_APP_NAME'];
+        super('heroic', {sandbox: SANDBOX, envKeys: ['HEROIC_APP_NAME']});
         this._installed = new StampCache(path => installedGames(readJson(path)));
-        this._configLists = new StampCache(dir => listDir(dir).filter(name => name.endsWith('.json')));
-        this._configs = new StampCache(path => {
+        // GamesConfig/ -> [{appName, prefix}]
+        this._configs = new FolderCache(name => name.endsWith('.json'), path => {
             const appName = basename(path).replace(/\.json$/, '');
             return {appName, prefix: gamePrefix(appName, readJson(path))};
         });
     }
 
-    indexEntry(entry, _argv, index) {
-        const m = entry.exec?.match(LAUNCH);
-        if (!m)
-            return false;
-        index.add(index.map('heroic'), decode(m[1] ?? m[2]), entry.id);
-        return true;
+    entryKeys(entry) {
+        const appName = launchedApp(entry);
+        return appName ? [appName] : null;
+    }
+
+    entryIcon(entry) {
+        const appName = launchedApp(entry);
+        return appName ? this._icon(appName, this._games().find(g => g.appName === appName)?.exe) : null;
     }
 
     // Native Heroic runs games outside any sandbox and doesn't always say
@@ -130,20 +134,9 @@ export class HeroicSource {
         return !!ctx.env.HEROIC_APP_NAME || this._appsInPrefix(ctx).length > 0;
     }
 
-    identify(ctx, index) {
-        const shortcuts = index.map('heroic');
-        const byEnv = index.find(shortcuts, ctx.env.HEROIC_APP_NAME, ctx);
-        if (byEnv)
-            return {id: byEnv};
-
-        const id = index.find(shortcuts, this._game(ctx)?.appName, ctx);
-        return id ? {id} : null;
-    }
-
-    entryIcon(entry) {
-        const m = entry.exec?.match(LAUNCH);
-        const appName = m && decode(m[1] ?? m[2]);
-        return appName ? this._icon(appName, this._games().find(g => g.appName === appName)?.exe) : null;
+    *windowKeys(ctx) {
+        yield ctx.env.HEROIC_APP_NAME;
+        yield this._game(ctx)?.appName;
     }
 
     fallback(ctx) {
@@ -159,7 +152,7 @@ export class HeroicSource {
         const saved = iconOf(appName);
         if (saved && looksLikeIcon(saved))
             return saved;
-        return (exe && exists(exe) ? exeInfo(exe)?.icon : null) ?? saved;
+        return exeIcon(exe) ?? saved;
     }
 
     // Native Heroic's games first, or the Flatpak's: both may know the same
@@ -174,35 +167,27 @@ export class HeroicSource {
     // The appNames whose Heroic prefix the process runs in (Proton's
     // WINEPREFIX is <prefix>/pfx).
     _appsInPrefix(ctx) {
-        if (ctx.heroicApps === undefined) {
+        return this.remember(ctx, 'heroicApps', () => {
             const keys = [ctx.prefix, canonical(ctx.env.STEAM_COMPAT_DATA_PATH)].filter(Boolean)
                 .map(pathKey).flatMap(p => p.endsWith('/pfx') ? [p, p.slice(0, -4)] : [p]);
-            ctx.heroicApps = keys.length ? roots().flatMap(root => {
-                const dir = `${root}/GamesConfig`;
-                return (this._configLists.get(dir) ?? []).map(name => this._configs.get(`${dir}/${name}`));
-            }).filter(c => c?.prefix && keys.includes(c.prefix)).map(c => c.appName) : [];
-        }
-        return ctx.heroicApps;
+            return keys.length ? roots().flatMap(root => this._configs.get(`${root}/GamesConfig`))
+                .filter(c => c.prefix && keys.includes(c.prefix)).map(c => c.appName) : [];
+        });
     }
 
     _game(ctx) {
-        if (ctx.heroic !== undefined)
-            return ctx.heroic;
-        const appName = ctx.env.HEROIC_APP_NAME;
-        const inPrefix = this._appsInPrefix(ctx);
-        const where = guessPaths(ctx, this);
-        let game = null;
-        if (appName || inPrefix.length || where.length) {
-            const games = this._games(ctx.launcherSandbox === SANDBOX);
-            const named = name => games.find(g => g.appName === name) ?? {appName: name, title: null};
+        return this.remember(ctx, 'heroic', () => {
+            const appName = ctx.env.HEROIC_APP_NAME;
+            const inPrefix = this._appsInPrefix(ctx);
+            const games = () => this._games(ctx.launcherSandbox === SANDBOX);
+            const named = name => games().find(g => g.appName === name) ?? {appName: name, title: null};
+            if (appName)
+                return named(appName);
+            if (inPrefix.length === 1)
+                return named(inPrefix[0]);
             // Several games may share a prefix: then their folders decide.
-            const candidates = inPrefix.length ? games.filter(g => inPrefix.includes(g.appName)) : games;
-            game = (appName && named(appName)) ||
-                (inPrefix.length === 1 && named(inPrefix[0])) ||
-                candidates.find(g => where.some(path => isUnder(path, g.dir))) ||
-                null;
-        }
-        ctx.heroic = game;
-        return game;
+            return this.gameInFolder(ctx,
+                () => inPrefix.length ? games().filter(g => inPrefix.includes(g.appName)) : games());
+        });
     }
 }

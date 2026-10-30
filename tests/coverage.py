@@ -6,11 +6,23 @@ covered, and which lines (or branches) no test reached.
 """
 
 import os
+import re
 import sys
 
 # The modules that run in plain gjs, and so must be fully covered here. The
 # others need GNOME Shell and are tested there.
 TESTED_HERE = ['lib', 'sources', 'mirror']
+
+
+# gjs counts a branch on a `class X extends Y` line that no code can take.
+SUBCLASS = re.compile(r'^\s*(export )?class \w+ extends ')
+
+
+def subclass_lines(path):
+    try:
+        return {n for n, line in enumerate(open(path), 1) if SUBCLASS.match(line)}
+    except OSError:
+        return set()
 
 
 def parse(path):
@@ -65,7 +77,8 @@ def main(lcov, src):
             gaps.append(f'{rel}: never loaded')
             continue
         lines = data['lines']
-        branches = data['branches']
+        skip = subclass_lines(os.path.join(src, rel))
+        branches = {key: h for key, h in data['branches'].items() if key[0] not in skip}
         lh = sum(1 for h in lines.values() if h)
         bh = sum(1 for h in branches.values() if h)
         total_l += len(lines)

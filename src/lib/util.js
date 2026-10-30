@@ -40,6 +40,11 @@ export function dataDir(...parts) {
     return GLib.build_filenamev([GLib.get_user_data_dir(), ...parts]);
 }
 
+// Inside a Flatpak app's sandbox: ~/.var/app/<id>/...
+export function sandboxDir(id, ...parts) {
+    return home('.var', 'app', id, ...parts);
+}
+
 export function configDir(...parts) {
     return GLib.build_filenamev([GLib.get_user_config_dir(), ...parts]);
 }
@@ -123,6 +128,20 @@ export class StampCache {
     }
 }
 
+// The parsed files of a folder whose names pass filter: the folder is
+// listed again when it changes, each file read again when it does. Files
+// that can't be read or parsed are left out.
+export class FolderCache {
+    constructor(filter, load) {
+        this._lists = new StampCache(dir => listDir(dir).filter(filter));
+        this._files = new StampCache(load);
+    }
+
+    get(dir) {
+        return (this._lists.get(dir) ?? []).map(name => this._files.get(`${dir}/${name}`)).filter(Boolean);
+    }
+}
+
 // Lowercased, since paths taken from a Wine argv don't keep the real case.
 export function pathKey(path) {
     return path.toLowerCase();
@@ -193,7 +212,7 @@ export const LAUNCHER_SANDBOXES = new Set([
 // an absolute path, or null.
 export function findSandboxedIcon(name) {
     for (const id of LAUNCHER_SANDBOXES) {
-        for (const share of [home('.var', 'app', id, 'data'), home('.var', 'app', id, '.local', 'share')]) {
+        for (const share of [sandboxDir(id, 'data'), sandboxDir(id, '.local', 'share')]) {
             // Most of these launchers aren't installed: one check, not 16.
             if (!exists(`${share}/icons/hicolor`))
                 continue;

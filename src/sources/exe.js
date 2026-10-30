@@ -3,9 +3,9 @@
 // for: Heroic sideloads, Flatpak Bottles, Lutris without its icon, plain
 // `wine game.exe`.
 
-import {exeInfo} from '../lib/peicon.js';
-import {programFromArgv, wineToHost} from '../lib/process.js';
-import {basename, canonical, exists, home, stripExt} from '../lib/util.js';
+import {exeIcon, exeInfo} from '../lib/peicon.js';
+import {execPrefix, programFromArgv, wineToHost} from '../lib/process.js';
+import {basename, exists, stripExt} from '../lib/util.js';
 
 export class ExeSource {
     constructor() {
@@ -17,10 +17,7 @@ export class ExeSource {
         const program = programFromArgv(argv)?.path;
         if (!program || !/\.exe$/i.test(program))
             return null;
-        const prefix = canonical(argv.map(arg => arg.match(/^WINEPREFIX=(.+)$/)?.[1]).find(Boolean)) ??
-            home('.wine');
-        const path = wineToHost(program, prefix);
-        return path && exists(path) ? exeInfo(path)?.icon ?? null : null;
+        return exeIcon(wineToHost(program, execPrefix(argv)));
     }
 
     fallback(ctx) {

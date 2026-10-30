@@ -324,3 +324,8 @@ export function exeInfo(path, dir = cacheDir()) {
     known.set(`${dir}\n${path}`, {stamp, info});
     return info;
 }
+
+// Just the icon of a program (a PNG path), or null.
+export function exeIcon(path, dir) {
+    return path ? exeInfo(path, dir)?.icon ?? null : null;
+}

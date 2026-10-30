@@ -6,8 +6,9 @@
 // executable, and a running program's WINEPREFIX is the bottle's folder.
 
 import {parseYaml} from '../lib/formats.js';
-import {exeInfo} from '../lib/peicon.js';
-import {StampCache, basename, canonical, dataDir, exeStem, exists, home, listDir, readText} from '../lib/util.js';
+import {exeIcon} from '../lib/peicon.js';
+import {StampCache, basename, canonical, dataDir, exeStem, exists, listDir, readText, sandboxDir} from '../lib/util.js';
+import {LauncherSource} from './launcher.js';
 
 const FLAGS = {
     '-p': 'program', '--program': 'program',
@@ -15,18 +16,18 @@ const FLAGS = {
     '-e': 'executable', '--executable': 'executable',
 };
 
-const BOTTLES_APP = 'com.usebottles.bottles';
+const SANDBOX = 'com.usebottles.bottles';
 
 // Native first, then Flatpak.
 function bottleDirs() {
     return [
         dataDir('bottles', 'bottles'),
-        home('.var', 'app', BOTTLES_APP, 'data', 'bottles', 'bottles'),
+        sandboxDir(SANDBOX, 'data', 'bottles', 'bottles'),
     ];
 }
 
 const LAUNCHERS = new Set([
-    'bottles-cli', 'bottles', '--command=bottles-cli', '--command=bottles', 'com.usebottles.bottles',
+    'bottles-cli', 'bottles', '--command=bottles-cli', '--command=bottles', SANDBOX,
 ]);
 
 // `[flatpak run --command=bottles-cli com.usebottles.bottles] bottles-cli run
@@ -67,54 +68,26 @@ export function bottleFromConfig(config) {
     return {name: config.Name ?? null, programs};
 }
 
-export class BottlesSource {
+export class BottlesSource extends LauncherSource {
     constructor() {
-        this.name = 'bottles';
-        this.sandbox = BOTTLES_APP;
-        this.envKeys = ['BOTTLE'];
+        super('bottles', {sandbox: SANDBOX, envKeys: ['BOTTLE']});
         this._configs = new StampCache(path => bottleFromConfig(parseYaml(readText(path))));
     }
 
-    indexEntry(entry, argv, index) {
+    // -b is the bottle's folder name or path (native Bottles) or its Name
+    // (Flatpak Bottles); windowKeys() tries all three.
+    entryKeys(entry, argv, index) {
         const launch = parseBottlesExec(argv);
         if (!launch)
-            return false;
-        // -b is the bottle's folder name or path (native Bottles) or its
-        // Name (Flatpak Bottles); identify() tries all three.
+            return null;
         const ref = canonical(launch.bottle) ?? launch.bottle;
-        const map = index.map('bottles');
-        if (launch.program)
-            index.add(map, `${ref}\n${launch.program}`, entry.id);
+        const keys = launch.program ? [`${ref}\n${launch.program}`] : [];
         if (launch.executable) {
             const stem = exeStem(launch.executable);
-            index.add(map, `${ref}\nexe:${stem}`, entry.id);
+            keys.push(`${ref}\nexe:${stem}`);
             index.add(index.exec, stem, entry.id);
         }
-        return true;
-    }
-
-    // A bottle is a prefix only Bottles makes.
-    launched(ctx) {
-        return !!ctx.env.BOTTLE || !!this._bottle(ctx);
-    }
-
-    identify(ctx, index) {
-        const bottle = this._bottle(ctx);
-        if (!bottle)
-            return null;
-        const map = index.map('bottles');
-        const refs = [bottle.dir, basename(bottle.dir), bottle.name].filter(Boolean);
-        for (const stem of ctx.stems) {
-            const names = bottle.programs.filter(p => p.stem === stem).map(p => p.name);
-            for (const ref of refs) {
-                for (const key of [...names, `exe:${stem}`]) {
-                    const id = index.find(map, `${ref}\n${key}`, ctx);
-                    if (id)
-                        return {id};
-                }
-            }
-        }
-        return null;
+        return keys;
     }
 
     // The icon Bottles extracted from the program's .exe, else the .exe.
@@ -128,7 +101,7 @@ export class BottlesSource {
         // Native and Flatpak bottles may share names: look where this
         // entry's Bottles keeps them first.
         const roots = bottleDirs();
-        if (argv.includes(BOTTLES_APP))
+        if (argv.includes(SANDBOX))
             roots.reverse();
         const candidates = canonical(ref) ? [canonical(ref)]
             : roots.flatMap(root => listDir(root).map(name => `${root}/${name}`));
@@ -140,11 +113,27 @@ export class BottlesSource {
             if (!program)
                 continue;
             const icon = `${dir}/icons/${program.name}.png`;
-            if (exists(icon))
-                return icon;
-            return program.path && exists(program.path) ? exeInfo(program.path)?.icon ?? null : null;
+            return exists(icon) ? icon : exeIcon(program.path);
         }
         return null;
+    }
+
+    // A bottle is a prefix only Bottles makes.
+    launched(ctx) {
+        return !!ctx.env.BOTTLE || !!this._bottle(ctx);
+    }
+
+    // For each program name: what the entry may call the bottle, then the
+    // program by its name in the bottle or by its .exe.
+    windowKeys(ctx) {
+        const bottle = this._bottle(ctx);
+        if (!bottle)
+            return [];
+        const refs = [bottle.dir, basename(bottle.dir), bottle.name].filter(Boolean);
+        return ctx.stems.flatMap(stem => {
+            const keys = [...bottle.programs.filter(p => p.stem === stem).map(p => p.name), `exe:${stem}`];
+            return refs.flatMap(ref => keys.map(key => `${ref}\n${key}`));
+        });
     }
 
     // A program added to Bottles but never given a desktop entry: Bottles
@@ -156,10 +145,9 @@ export class BottlesSource {
     }
 
     _bottle(ctx) {
-        if (ctx.bottle === undefined) {
+        return this.remember(ctx, 'bottle', () => {
             const config = ctx.prefix && this._configs.get(`${ctx.prefix}/bottle.yml`);
-            ctx.bottle = config ? {dir: ctx.prefix, ...config} : null;
-        }
-        return ctx.bottle;
+            return config ? {dir: ctx.prefix, ...config} : null;
+        });
     }
 }

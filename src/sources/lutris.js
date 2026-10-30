@@ -7,17 +7,17 @@
 // game's name as GAME_NAME.
 
 import {parseYaml} from '../lib/formats.js';
-import {guessPaths} from '../lib/matcher.js';
-import {exeInfo} from '../lib/peicon.js';
+import {exeIcon} from '../lib/peicon.js';
 import {
-    StampCache, basename, canonical, configDir, dataDir, exeStem, exists, findHicolorIcon, home,
-    isSpecificDir, isUnder, listDir, pathKey, readText,
+    FolderCache, basename, canonical, configDir, dataDir, exeStem, findHicolorIcon, isSpecificDir, pathKey,
+    readText, sandboxDir,
 } from '../lib/util.js';
+import {LauncherSource} from './launcher.js';
 
 const SANDBOX = 'net.lutris.Lutris';
 
 function flatpakDir(...parts) {
-    return home('.var', 'app', SANDBOX, ...parts);
+    return sandboxDir(SANDBOX, ...parts);
 }
 
 function gameDirs() {
@@ -58,47 +58,41 @@ export function gameFromConfig(path, config) {
     };
 }
 
-export class LutrisSource {
+export class LutrisSource extends LauncherSource {
     constructor() {
-        this.name = 'lutris';
-        this.sandbox = SANDBOX;
-        this.envKeys = ['GAME_NAME', 'LUTRIS_GAME_UUID'];
+        super('lutris', {sandbox: SANDBOX, envKeys: ['GAME_NAME', 'LUTRIS_GAME_UUID']});
         // Configs are rewritten in place, so each one is checked on its own;
         // the folder only tells us which ones exist.
-        this._lists = new StampCache(dir => listDir(dir).filter(name => /\.ya?ml$/.test(name)));
-        this._configs = new StampCache(path => gameFromConfig(path, parseYaml(readText(path))));
+        this._configs = new FolderCache(name => /\.ya?ml$/.test(name),
+            path => gameFromConfig(path, parseYaml(readText(path))));
     }
 
-    indexEntry(entry, _argv, index) {
+    entryKeys(entry) {
         const slug = slugOf(entry);
         if (slug === undefined)
-            return false;
-        if (slug)
-            index.add(index.map('lutris'), slug, entry.id);
-        return true;
+            return null;
+        return slug ? [slug] : [];
     }
 
-    // Older versions don't set LUTRIS_GAME_UUID; a prefix Lutris made for
-    // a game is as sure a sign.
     // Its lutris_<slug> icon, else the game's .exe.
     entryIcon(entry) {
         const slug = slugOf(entry);
         if (!slug)
             return null;
-        const icon = findHicolorIcon(dataDir(), `lutris_${slug}`) ?? findHicolorIcon(flatpakDir('data'), `lutris_${slug}`);
-        const exe = !icon && this._games().find(g => g.slug === slug)?.exe;
-        return icon ?? (exe && exists(exe) ? exeInfo(exe)?.icon ?? null : null);
+        return findHicolorIcon(dataDir(), `lutris_${slug}`) ??
+            findHicolorIcon(flatpakDir('data'), `lutris_${slug}`) ??
+            exeIcon(this._games().find(g => g.slug === slug)?.exe);
     }
 
+    // Older versions don't set LUTRIS_GAME_UUID; a prefix Lutris made for
+    // a game is as sure a sign.
     launched(ctx) {
         return !!ctx.env.LUTRIS_GAME_UUID ||
             (!!ctx.prefix && this._games().some(g => g.prefix === ctx.prefix));
     }
 
-    identify(ctx, index) {
-        const game = this._game(ctx);
-        const id = game && index.find(index.map('lutris'), game.slug, ctx);
-        return id ? {id} : null;
+    windowKeys(ctx) {
+        return [this._game(ctx)?.slug];
     }
 
     fallback(ctx) {
@@ -110,23 +104,13 @@ export class LutrisSource {
     }
 
     _games() {
-        return gameDirs().flatMap(dir => (this._lists.get(dir) ?? [])
-            .map(name => this._configs.get(`${dir}/${name}`))
-            .filter(Boolean));
+        return gameDirs().flatMap(dir => this._configs.get(dir));
     }
 
+    // By its prefix and program, else by its folder.
     _game(ctx) {
-        if (ctx.lutris !== undefined)
-            return ctx.lutris;
-        const where = guessPaths(ctx, this);
-        let game = null;
-        if (ctx.prefix || where.length) {
-            const games = this._games();
-            game = games.find(g => g.prefix && g.prefix === ctx.prefix && ctx.stems.includes(g.stem)) ??
-                games.find(g => g.dir && where.some(path => isUnder(path, g.dir))) ??
-                null;
-        }
-        ctx.lutris = game;
-        return game;
+        return this.remember(ctx, 'lutris', () =>
+            (ctx.prefix && this._games().find(g => g.prefix === ctx.prefix && ctx.stems.includes(g.stem))) ||
+            this.gameInFolder(ctx, () => this._games()));
     }
 }

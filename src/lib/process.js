@@ -143,6 +143,12 @@ export function readProcess(pid, envKeys) {
     return info;
 }
 
+// The Wine prefix an Exec= line runs in (`env WINEPREFIX=... wine ...`),
+// or Wine's default.
+export function execPrefix(argv) {
+    return canonical(argv.map(arg => arg.match(/^WINEPREFIX=(.+)$/)?.[1]).find(Boolean)) ?? home('.wine');
+}
+
 // The Wine prefix a process runs in: WINEPREFIX, or Wine's default.
 export function winePrefixOf(proc, wine) {
     return canonical(proc.env.WINEPREFIX) ?? (wine ? home('.wine') : null);

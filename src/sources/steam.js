@@ -11,14 +11,16 @@ import GLib from 'gi://GLib';
 
 import {parseBinaryVdf, parseVdf} from '../lib/formats.js';
 import * as log from '../lib/log.js';
-import {guessPaths} from '../lib/matcher.js';
-import {exeInfo} from '../lib/peicon.js';
+import {exeIcon} from '../lib/peicon.js';
 import {
-    StampCache, canonical, dataDir, exists, findHicolorIcon, home, isUnder, listDir, pathKey, readText,
+    FolderCache, StampCache, canonical, dataDir, exists, findHicolorIcon, home, listDir, pathKey, readText, sandboxDir,
 } from '../lib/util.js';
+import {LauncherSource} from './launcher.js';
+
+const SANDBOX = 'com.valvesoftware.Steam';
 
 function flatpakShare() {
-    return home('.var', 'app', 'com.valvesoftware.Steam', '.local', 'share');
+    return sandboxDir(SANDBOX, '.local', 'share');
 }
 
 function steamRoots() {
@@ -68,7 +70,7 @@ export function shortcutLook(shortcut, dir) {
     let icon = null;
     for (const file of [shortcut.icon, shortcut.exe].filter(Boolean)) {
         if (/\.exe$/i.test(file))
-            icon = exeInfo(file, dir)?.icon ?? null;
+            icon = exeIcon(file, dir);
         else if (/\.(png|svg|jpe?g)$/i.test(file) && exists(file))
             icon = file;
         if (icon)
@@ -80,6 +82,9 @@ export function shortcutLook(shortcut, dir) {
 // ".../steamapps/compatdata/<id>" or ".../compatdata/<id>/pfx" -> id
 const COMPAT_DATA = /\/compatdata\/(\d+)(?:\/pfx)?\/?$/;
 
+// What a shortcut runs: steam://rungameid/<game id> or steam://run/<app id>
+const RUN = /steam:\/\/(?:rungameid|run)\/(\d+)/;
+
 function resolveLink(path) {
     try {
         const target = GLib.file_read_link(path);
@@ -89,11 +94,9 @@ function resolveLink(path) {
     }
 }
 
-export class SteamSource {
+export class SteamSource extends LauncherSource {
     constructor() {
-        this.name = 'steam';
-        this.sandbox = 'com.valvesoftware.Steam';
-        this.envKeys = ['SteamAppId', 'SteamGameId', 'STEAM_COMPAT_DATA_PATH', 'GAMEID'];
+        super('steam', {sandbox: SANDBOX, envKeys: ['SteamAppId', 'SteamGameId', 'STEAM_COMPAT_DATA_PATH', 'GAMEID']});
 
         // libraryfolders.vdf -> library folders it lists
         this._folders = new StampCache(path => {
@@ -104,41 +107,39 @@ export class SteamSource {
                 .filter(Boolean);
         });
         this._shortcuts = new StampCache(readShortcuts);
-        // <library>/steamapps -> [{id, name, dir}], reparsed when a manifest
-        // is added, removed or replaced (Steam rewrites them by renaming).
-        this._manifests = new StampCache(steamapps => listDir(steamapps)
-            .filter(name => /^appmanifest_\d+\.acf$/.test(name))
-            .map(name => parseVdf(readText(`${steamapps}/${name}`) ?? '').appstate)
-            .filter(app => app?.appid && app.installdir)
-            .map(app => ({
-                id: app.appid,
-                name: app.name ?? null,
-                dir: pathKey(`${steamapps}/common/${app.installdir}`),
-            })));
+        // <library>/steamapps -> [{id, name, dir}] from its manifests (Steam
+        // rewrites them by renaming)
+        this._manifests = new FolderCache(name => /^appmanifest_\d+\.acf$/.test(name), path => {
+            const app = parseVdf(readText(path) ?? '').appstate;
+            if (!app?.appid || !app.installdir)
+                return null;
+            const dir = `${GLib.path_get_dirname(path)}/common/${app.installdir}`;
+            return {id: app.appid, name: app.name ?? null, dir: pathKey(dir)};
+        });
     }
 
-    indexEntry(entry, _argv, index) {
-        const steam = index.map('steam');
+    // Steam's own shortcuts are also known by their icon, steam_icon_<id>.
+    indexEntry(entry, argv, index) {
         const icon = entry.icon?.match(/^steam_icon_(\d+)$/);
         if (icon)
-            index.add(steam, icon[1], entry.id);
+            index.add(index.map(this.name), icon[1], entry.id);
+        return super.indexEntry(entry, argv, index);
+    }
 
-        const run = entry.exec?.match(/steam:\/\/(?:rungameid|run)\/(\d+)/);
+    // Non-Steam shortcuts launch by a 64-bit game id whose upper half is
+    // the app id used in steam_app_<id>.
+    entryKeys(entry) {
+        const run = entry.exec?.match(RUN);
         if (!run)
-            return false;
-        index.add(steam, run[1], entry.id);
-        // Non-Steam shortcuts launch by a 64-bit game id whose upper half is
-        // the app id used in steam_app_<id>.
+            return null;
         const gameId = BigInt(run[1]);
-        if (gameId > 0xffffffffn)
-            index.add(steam, String(gameId >> 32n), entry.id);
-        return true;
+        return gameId > 0xffffffffn ? [run[1], String(gameId >> 32n)] : [run[1]];
     }
 
     // Non-Steam games: the icon picked in Steam or the .exe's own. Steam
     // games: their steam_icon_<id>, wherever Steam put it.
     entryIcon(entry) {
-        const gameId = entry.exec?.match(/steam:\/\/(?:rungameid|run)\/(\d+)/)?.[1];
+        const gameId = entry.exec?.match(RUN)?.[1];
         if (!gameId)
             return null;
         if (BigInt(gameId) > 0xffffffffn) {
@@ -156,25 +157,19 @@ export class SteamSource {
         return /^[1-9]\d*$/.test(ctx.env.SteamAppId ?? '') && !ctx.env.GAMEID;
     }
 
-    identify(ctx, index) {
-        const steam = index.map('steam');
+    *windowKeys(ctx) {
         const ids = this._ids(ctx);
         ctx.steamIds = ids;
-        for (const id of ids) {
-            const found = index.find(steam, id, ctx);
-            if (found)
-                return {id: found};
-        }
-
+        // (Not for...of: gjs counts a branch for leaving it early.)
+        for (let i = 0; i < ids.length; i++)
+            yield ids[i];
         // Started outside Steam, or its environment couldn't be read: the
         // files still live in a Steam library.
         const game = this._gameAt(ctx);
-        if (!game)
-            return null;
-        if (!ids.includes(game.id))
+        if (game && !ids.includes(game.id)) {
             ids.push(game.id);
-        const found = index.find(steam, game.id, ctx);
-        return found ? {id: found} : null;
+            yield game.id;
+        }
     }
 
     fallback(ctx) {
@@ -254,9 +249,6 @@ export class SteamSource {
     }
 
     _gameAt(ctx) {
-        const where = guessPaths(ctx, this);
-        if (!where.length)
-            return null;
-        return this._games().find(game => where.some(path => isUnder(path, game.dir))) ?? null;
+        return this.gameInFolder(ctx, () => this._games());
     }
 }

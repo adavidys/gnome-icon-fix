@@ -32,8 +32,15 @@
 //       What to show when no entry matched at all: a themed icon name, an
 //       icon file, a display name. Missing icons are skipped by the caller.
 //
+// The launchers (Steam, Heroic, Lutris, Bottles, plain Wine) build on
+// LauncherSource (launcher.js), which does indexEntry() and identify() from
+// their entryKeys() and windowKeys(); each lives in a file of its own laid
+// out the same way: where it keeps its files, how to read them, then the
+// source: its shortcuts (entryKeys, entryIcon), a running game (launched,
+// windowKeys, fallback) and the lookups behind them.
+//
 // Sources live while the extension is enabled and cache what they read
-// from disk until the file changes (StampCache in lib/util.js).
+// from disk until the file changes (StampCache, FolderCache in lib/util.js).
 
 import {BottlesSource} from './bottles.js';
 import {ExeSource} from './exe.js';
