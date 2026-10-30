@@ -159,8 +159,12 @@ export class WindowSplitter {
                 [app, app.get_windows().reduce((t, w) => Math.max(t, w.get_user_time()), 0)]));
             return running.sort((a, b) => lastUsed.get(b) - lastUsed.get(a));
         });
-        this._injections.overrideMethod(Shell.WindowTracker.prototype, 'get_window_app', original => function (win) {
-            return splitter._moved.get(win)?.app ?? original.call(this, win);
+        this._injections.overrideMethod(Shell.WindowTracker.prototype, 'get_window_app', original => {
+            // GNOME's own answer, for _check()
+            splitter._gnomeApp = win => original.call(splitter._tracker, win);
+            return function (win) {
+                return splitter._moved.get(win)?.app ?? original.call(this, win);
+            };
         });
 
         global.display.connectObject('window-created',
@@ -227,7 +231,14 @@ export class WindowSplitter {
         if (win.is_override_redirect())
             return;
         const current = this._moved.get(win);
-        const host = current?.host ?? this._tracker.get_window_app(win);
+        // Asked again each time: GNOME tracks every window anew when the
+        // installed apps change, and makes up a new app for an unmatched one.
+        const host = this._gnomeApp(win);
+        // Already moved there, also when GNOME now gives it the game's
+        // entry itself (by its pid, which the entry reports while moved).
+        if (current && (host === current.host || host === current.app) &&
+            this._findApp(win, this, current.host) === current.app)
+            return;
         const app = host && (LAUNCHER_SANDBOXES.has(win.get_sandboxed_app_id()) || host.is_window_backed())
             ? this._findApp(win, this, host) : null;
         if (!app || !host || app === host) {
@@ -235,11 +246,8 @@ export class WindowSplitter {
                 this._release(win);
             return;
         }
-        if (current?.app === app)
-            return;
-        if (current)
-            this._release(win);
-
+        // Moved straight on when it was elsewhere (GNOME makes new apps for
+        // entries that changed), without going back in between.
         log.debug(`moved window "${win.get_title()}" (${win.get_wm_class()}, pid ${win.get_pid()}) ` +
             `from ${host.get_id()} to ${app.get_id()}`);
         this._moved.set(win, {app, host});
