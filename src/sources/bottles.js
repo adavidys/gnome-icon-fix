@@ -51,18 +51,20 @@ export function parseBottlesExec(argv) {
     return out.bottle && (out.program || out.executable) ? out : null;
 }
 
-// bottle.yml -> {name, programs: [{name, stem, path, removed}]}; removed:
+// bottle.yml -> {name, programs: [{name, stems, path, removed}]}; removed:
 // hidden in Bottles' program list.
 export function bottleFromConfig(config) {
     const programs = [];
     for (const program of Object.values(config.External_Programs ?? {})) {
         const exe = program?.executable || program?.path;
         if (program?.name && typeof exe === 'string') {
-            // A shortcut (.lnk) is known by the program it starts.
+            // A shortcut (.lnk) is known by the program it starts, and by its
+            // own name: Battle.net.lnk starts "Battle.net Launcher.exe",
+            // which starts Battle.net.exe and quits.
             const runs = /\.lnk$/i.test(exe) && typeof program.path === 'string' ? programOf(program.path) : exe;
             programs.push({
                 name: program.name,
-                stem: exeStem(runs),
+                stems: [...new Set([exeStem(runs), exeStem(exe)])],
                 path: canonical(program.path),
                 removed: program.removed === 'true',
             });
@@ -134,7 +136,7 @@ export class BottlesSource extends LauncherSource {
             return [];
         const refs = [bottle.dir, basename(bottle.dir), bottle.name].filter(Boolean);
         return ctx.stems.flatMap(stem => {
-            const keys = [...bottle.programs.filter(p => p.stem === stem).map(p => p.name), `exe:${stem}`];
+            const keys = [...bottle.programs.filter(p => p.stems.includes(stem)).map(p => p.name), `exe:${stem}`];
             return refs.flatMap(ref => keys.map(key => `${ref}\n${key}`));
         });
     }
@@ -143,7 +145,7 @@ export class BottlesSource extends LauncherSource {
     // still extracted its icon from the .exe.
     fallback(ctx) {
         const bottle = this._bottle(ctx);
-        const program = bottle?.programs.find(p => ctx.stems.includes(p.stem));
+        const program = bottle?.programs.find(p => p.stems.some(stem => ctx.stems.includes(stem)));
         return program ? {icon: `${bottle.dir}/icons/${program.name}.png`, name: program.name} : null;
     }
 

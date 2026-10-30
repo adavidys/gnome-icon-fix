@@ -179,7 +179,10 @@ test('bottles: launch lines and configs', () => {
     eq(parseBottlesExec(['foo', '-b', 'B']), null);
     eq(bottleFromConfig({}), {name: null, programs: []});
     const config = bottleFromConfig({Name: 'N', External_Programs: {a: {name: 'A', executable: 'A.exe', path: '/g/A.exe', removed: 'true'}, b: {name: 'B', path: 'rel/B.exe'}, c: {name: 'C'}, d: null}});
-    eq(config, {name: 'N', programs: [{name: 'A', stem: 'a', path: '/g/A.exe', removed: true}, {name: 'B', stem: 'b', path: null, removed: false}]});
+    eq(config, {name: 'N', programs: [{name: 'A', stems: ['a'], path: '/g/A.exe', removed: true}, {name: 'B', stems: ['b'], path: null, removed: false}]});
+    // A shortcut: by the program it starts and by its own name.
+    const lnk = `${HOME}/.wine-game/drive_c/users/x/Start Menu/Launcher.lnk`;
+    eq(bottleFromConfig({External_Programs: {a: {name: 'L', executable: 'Launcher.lnk', path: lnk}}}).programs[0].stems, ['game', 'launcher']);
 });
 
 test('bottles: shortcuts, launch detection, games', () => {
