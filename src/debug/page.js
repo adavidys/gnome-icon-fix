@@ -157,25 +157,41 @@ function candidateIcon(step, decided) {
     });
 }
 
+// A step's looked-up value longer than this wraps.
+const TRIED_CHARS = 40;
+
+// A step: its marks, then its name with what it looked up beside it, and
+// below, the width of the row to itself, what it found and why.
 function stepRow(step, decided) {
     const c = candidateOf(step);
-    const row = new Adw.ActionRow({
-        title: GLib.markup_escape_text(step.step, -1),
-        subtitle: GLib.markup_escape_text(c ? `${c.name} (${c.id}) · ${step.why}` : step.why, -1),
-        subtitle_lines: 3,
-    });
-    // add_prefix() puts each new prefix first: the mark ends up left of
-    // the app's icon. Notes don't look anything up: no icon for them.
+    const marks = new Gtk.Box({spacing: 6, valign: Gtk.Align.CENTER});
+    marks.append(stepIcon(step, decided));
+    // Notes don't look anything up: no icon for them.
     if (!NOTES.has(step.step))
-        row.add_prefix(candidateIcon(step, decided));
-    row.add_prefix(stepIcon(step, decided));
+        marks.append(candidateIcon(step, decided));
+
+    const top = new Gtk.Box({spacing: 12});
+    top.append(new Gtk.Label({label: step.step, xalign: 0, hexpand: true, wrap: true}));
     if (step.tried !== null && step.tried !== undefined) {
-        row.add_suffix(new Gtk.Label({
-            label: String(step.tried), ellipsize: Pango.EllipsizeMode.MIDDLE, max_width_chars: 28,
-            css_classes: ['monospace', 'dim-label'], tooltip_text: String(step.tried),
+        // Shown whole; only a value longer than a line (a path) wraps.
+        const tried = String(step.tried);
+        const long = tried.length > TRIED_CHARS;
+        top.append(new Gtk.Label({
+            label: tried, xalign: 1, valign: Gtk.Align.START, css_classes: ['monospace', 'dim-label'],
+            ...long ? {wrap: true, wrap_mode: Pango.WrapMode.CHAR, width_chars: TRIED_CHARS, max_width_chars: TRIED_CHARS} : {},
         }));
     }
-    return row;
+    const text = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, spacing: 2, hexpand: true, valign: Gtk.Align.CENTER});
+    text.append(top);
+    text.append(new Gtk.Label({
+        label: c ? `${c.name} (${c.id}) · ${step.why}` : step.why,
+        xalign: 0, wrap: true, wrap_mode: Pango.WrapMode.WORD_CHAR, css_classes: ['dim-label', 'caption'],
+    }));
+
+    const box = new Gtk.Box({spacing: 12, margin_start: 12, margin_end: 12, margin_top: 8, margin_bottom: 8});
+    box.append(marks);
+    box.append(text);
+    return new Gtk.ListBoxRow({child: box, activatable: false});
 }
 
 // One name or icon Icon Fix considered (debug/trace.js, extension.js
