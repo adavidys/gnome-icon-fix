@@ -16,7 +16,7 @@
 // interface (registry.js) stays the launcher's own.
 
 import {guessPaths} from '../lib/matcher.js';
-import {isUnder} from '../lib/util.js';
+import {canonical, isUnder} from '../lib/util.js';
 
 export class LauncherSource {
     // sandbox: its Flatpak app id; envKeys: see registry.js
@@ -36,14 +36,20 @@ export class LauncherSource {
         return true;
     }
 
+    // A shortcut of the window's own flavor (native or the launcher's
+    // Flatpak) for any of its keys, else one of the other flavor: a native
+    // game mustn't get the Flatpak's shortcut while its own exists.
     identify(ctx, index) {
         const map = index.map(this.name);
+        const tried = [];
         for (const key of this.windowKeys(ctx)) {
-            const id = index.find(map, key, ctx);
+            const id = index.find(map, key, ctx, true);
             if (id)
                 return {id};
+            tried.push(key);
         }
-        return null;
+        const id = tried.map(key => index.find(map, key, ctx)).find(Boolean);
+        return id ? {id} : null;
     }
 
     // What a source worked out about a window, kept on its context for the
@@ -52,6 +58,15 @@ export class LauncherSource {
         if (ctx[key] === undefined)
             ctx[key] = find();
         return ctx[key];
+    }
+
+    // The Wine prefixes the window's process runs in: its WINEPREFIX and
+    // Proton's compat data folder, each also without the /pfx Proton (and
+    // umu) keep the actual prefix in.
+    prefixes(ctx) {
+        return this.remember(ctx, 'prefixes', () => [...new Set(
+            [ctx.prefix, canonical(ctx.env.STEAM_COMPAT_DATA_PATH)].filter(Boolean)
+                .flatMap(p => p.endsWith('/pfx') ? [p, p.slice(0, -4)] : [p]))]);
     }
 
     // The game ({dir}) whose install folder the window's program runs

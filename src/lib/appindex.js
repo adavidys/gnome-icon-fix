@@ -147,11 +147,12 @@ export class AppIndex {
     }
 
     // A source's entry for a key, preferring one of the window's own flavor
-    // (a native game gets the native launcher's shortcut).
-    find(map, key, ctx) {
+    // (a native game gets the native launcher's shortcut); ownOnly: only
+    // one of that flavor.
+    find(map, key, ctx, ownOnly = false) {
         if (!key)
             return null;
-        return map.get(`${flavorOf(ctx)}\0${key}`) ?? map.get(key) ?? null;
+        return map.get(`${flavorOf(ctx)}\0${key}`) ?? (ownOnly ? null : map.get(key)) ?? null;
     }
 
     // Looks a raw string (wm class, binary...) up in every map, strongest first.

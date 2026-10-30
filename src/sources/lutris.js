@@ -7,6 +7,7 @@
 // game's name as GAME_NAME.
 
 import {parseYaml} from '../lib/formats.js';
+import {programOf} from '../lib/lnk.js';
 import {exeIcon} from '../lib/peicon.js';
 import {
     FolderCache, basename, canonical, configDir, dataDir, exeStem, findHicolorIcon, isSpecificDir, pathKey,
@@ -20,13 +21,11 @@ function flatpakDir(...parts) {
     return sandboxDir(SANDBOX, ...parts);
 }
 
-function gameDirs() {
-    return [
-        configDir('lutris', 'games'),
-        dataDir('lutris', 'games'),
-        flatpakDir('config', 'lutris', 'games'),
-        flatpakDir('data', 'lutris', 'games'),
-    ];
+// Native Lutris's first, or the Flatpak's: both may know the same game.
+function gameDirs(flatpakFirst) {
+    const native = [configDir('lutris', 'games'), dataDir('lutris', 'games')];
+    const flatpak = [flatpakDir('config', 'lutris', 'games'), flatpakDir('data', 'lutris', 'games')];
+    return flatpakFirst ? [...flatpak, ...native] : [...native, ...flatpak];
 }
 
 const RUN = /lutris:(?:rungameid\/\d+|rungame\/([\w.-]+))/;
@@ -46,13 +45,15 @@ function slugOf(entry) {
 // <slug>-<timestamp>.yml -> {slug, stem, prefix, dir, exe}
 export function gameFromConfig(path, config) {
     const game = config.game ?? {};
-    const exe = typeof game.exe === 'string' ? game.exe : null;
+    const prefix = canonical(game.prefix);
+    // A shortcut (.lnk) given as its exe: the program it starts.
+    const exe = typeof game.exe === 'string' ? programOf(game.exe, prefix) : null;
     const exePath = canonical(exe);
     const dir = exePath ? exePath.slice(0, exePath.lastIndexOf('/')) : canonical(game.working_dir);
     return {
         slug: basename(path).replace(/\.ya?ml$/, '').replace(/-\d+$/, ''),
         stem: exe ? exeStem(exe) : null,
-        prefix: canonical(game.prefix),
+        prefix,
         dir: isSpecificDir(dir) ? pathKey(dir) : null,
         exe: exePath,
     };
@@ -87,8 +88,8 @@ export class LutrisSource extends LauncherSource {
     // Older versions don't set LUTRIS_GAME_UUID; a prefix Lutris made for
     // a game is as sure a sign.
     launched(ctx) {
-        return !!ctx.env.LUTRIS_GAME_UUID ||
-            (!!ctx.prefix && this._games().some(g => g.prefix === ctx.prefix));
+        const prefixes = this.prefixes(ctx);
+        return !!ctx.env.LUTRIS_GAME_UUID || (prefixes.length > 0 && this._games().some(g => prefixes.includes(g.prefix)));
     }
 
     windowKeys(ctx) {
@@ -103,14 +104,18 @@ export class LutrisSource extends LauncherSource {
         return {iconName, icon: findHicolorIcon(flatpakDir('data'), iconName), name: ctx.env.GAME_NAME || null};
     }
 
-    _games() {
-        return gameDirs().flatMap(dir => this._configs.get(dir));
+    _games(flatpakFirst = false) {
+        return gameDirs(flatpakFirst).flatMap(dir => this._configs.get(dir));
     }
 
-    // By its prefix and program, else by its folder.
+    // By its prefix and program, else by its folder; the window's own
+    // Lutris's first.
     _game(ctx) {
-        return this.remember(ctx, 'lutris', () =>
-            (ctx.prefix && this._games().find(g => g.prefix === ctx.prefix && ctx.stems.includes(g.stem))) ||
-            this.gameInFolder(ctx, () => this._games()));
+        return this.remember(ctx, 'lutris', () => {
+            const games = this._games(ctx.launcherSandbox === SANDBOX);
+            const prefixes = this.prefixes(ctx);
+            return games.find(g => prefixes.includes(g.prefix) && ctx.stems.includes(g.stem)) ??
+                this.gameInFolder(ctx, () => games);
+        });
     }
 }

@@ -149,6 +149,12 @@ test('lutris: configs, shortcuts, games', () => {
     eq(l.identify(ctx({proc: {pid: 0, argv: [], exe: null, cwd: null, env: {}}}), idx), null);
     eq(l.fallback(ctx({proc: {pid: 0, argv: [], exe: null, cwd: null, env: {}}})), null);
     eq(l._game(wine({}, {launcherSandbox: 'com.heroicgameslauncher.hgl'})), null, 'another launcher\'s game');
+    // umu runs the game in <prefix>/pfx; the Flatpak's window, its own config.
+    const umu = {WINEPREFIX: `${HOME}/Games/lutris-flat/pfx/`, STEAM_COMPAT_DATA_PATH: `${HOME}/Games/lutris-flat`};
+    eq(l.launched(wine(umu)), true, 'a prefix as umu has it');
+    eq(l._game(wine(umu, {launcherSandbox: 'net.lutris.Lutris'})).prefix, `${HOME}/Games/lutris-flat`);
+    eq(l._game(wine({}, {launcherSandbox: 'net.lutris.Lutris'})).prefix, `${HOME}/Games/lutris-flat`, 'by folder, the Flatpak\'s first');
+    eq(l._game(wine({})).prefix, `${HOME}/Games/lutris-pfx`, 'by folder, the native one first');
 });
 
 test('lutris: entry icons', () => {
@@ -201,6 +207,21 @@ test('bottles: shortcuts, launch detection, games', () => {
     eq(b.fallback(wine({})), null);
 });
 
+test('bottles: a native game gets the native shortcut, even by a later key', () => {
+    const b = S('bottles');
+    // By the bottle's folder name, tried first: only the Flatpak's; by its
+    // Name, tried after: the native one's.
+    const idx = index([
+        {id: 'flat.desktop', exec: 'flatpak run --command=bottles-cli com.usebottles.bottles run -p "Some Game" -b SomeBottle'},
+        {id: 'native.desktop', exec: 'bottles-cli run -p "Some Game" -b "Some Bottle"'},
+    ]);
+    eq(b.identify(wine({WINEPREFIX: NATIVE_BOTTLE}), idx), {id: 'native.desktop'});
+    eq(b.identify(wine({WINEPREFIX: BOTTLE}, {launcherSandbox: 'com.usebottles.bottles'}), idx), {id: 'flat.desktop'});
+    // Only the other flavor's: taken.
+    const flatOnly = index([{id: 'flat.desktop', exec: 'flatpak run --command=bottles-cli com.usebottles.bottles run -p "Some Game" -b SomeBottle'}]);
+    eq(b.identify(wine({WINEPREFIX: NATIVE_BOTTLE}), flatOnly), {id: 'flat.desktop'});
+});
+
 test('bottles: entry icons', () => {
     const b = S('bottles');
     const argv = (bottle, program, flatpak = true) => [...flatpak ? ['flatpak', 'run', '--command=bottles-cli', 'com.usebottles.bottles'] : ['bottles-cli'], 'run', '-p', program, '-b', bottle];
@@ -233,6 +254,10 @@ test('steam: shortcuts.vdf', () => {
     GLib.file_set_contents(other, '\x00other\x00\x08\x08');
     eq(readShortcuts(other), [], 'no shortcuts map');
     eq(shortcutLook({name: 'Game.EXE', icon: null, exe: GAME_EXE}, `${HOME}/look`).name, 'Game');
+    // A shortcut (.lnk) as its program: named like it, its program's icon.
+    const lnk = `${HOME}/.wine-game/drive_c/users/x/Start Menu/Launcher.lnk`;
+    eq(shortcutLook({name: 'Launcher.lnk', icon: null, exe: lnk}).name, 'Launcher');
+    ok(shortcutLook({name: 'Launcher.lnk', icon: null, exe: lnk}).icon.includes('/exe-icons/'));
     ok(shortcutLook({name: null, icon: null, exe: GAME_EXE}, `${HOME}/look`).icon.startsWith(`${HOME}/look/`));
     eq(shortcutLook({name: '', icon: `${HOME}/custom-icon.png`, exe: GAME_EXE}), {name: null, icon: `${HOME}/custom-icon.png`});
     eq(shortcutLook({name: 'x', icon: `${HOME}/missing.png`, exe: `${GAME_DIR}/Broken.exe`}), {name: 'x', icon: null});

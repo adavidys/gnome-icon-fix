@@ -62,11 +62,11 @@ export function shortcutFiles(root) {
     return listDir(`${root}/userdata`).map(user => `${root}/userdata/${user}/config/shortcuts.vdf`);
 }
 
-// What to show for a non-Steam game: Steam's name for it ("Game.exe" by
-// default: the extension isn't worth showing) and its icon, the one picked
+// What to show for a non-Steam game: Steam's name for it ("Game.exe" or
+// "Game.lnk" by default: the extension isn't worth showing) and its icon, the one picked
 // in Steam or the .exe's own. dir: where to save an icon from an .exe.
 export function shortcutLook(shortcut, dir) {
-    const name = shortcut.name?.replace(/\.exe$/i, '') || null;
+    const name = shortcut.name?.replace(/\.(exe|lnk)$/i, '') || null;
     let icon = null;
     for (const file of [shortcut.icon, shortcut.exe].filter(Boolean)) {
         if (/\.(exe|lnk)$/i.test(file))

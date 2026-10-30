@@ -8,6 +8,7 @@
 
 import GdkPixbuf from 'gi://GdkPixbuf';
 
+import {programOf} from '../lib/lnk.js';
 import {exeIcon} from '../lib/peicon.js';
 import {
     FolderCache, StampCache, basename, canonical, configDir, exists, isSpecificDir, pathKey, readJson, sandboxDir,
@@ -88,7 +89,8 @@ export function installedGames(json) {
     const games = [];
     for (const game of list) {
         const appName = game?.app_name ?? game?.appName ?? game?.id;
-        const exe = game?.install?.executable;
+        // A shortcut (.lnk) given as its executable: the program it starts.
+        const exe = typeof game?.install?.executable === 'string' ? programOf(game.install.executable) : undefined;
         const dir = canonical(game?.install_path ?? game?.path ??
             (typeof exe === 'string' ? exe.slice(0, exe.lastIndexOf('/')) : null));
         // Sideloaded: install.executable; Legendary: executable, relative.
@@ -164,12 +166,10 @@ export class HeroicSource extends LauncherSource {
         return all.flatMap(root => INSTALLED.flatMap(file => this._installed.get(`${root}/${file}`) ?? []));
     }
 
-    // The appNames whose Heroic prefix the process runs in (Proton's
-    // WINEPREFIX is <prefix>/pfx).
+    // The appNames whose Heroic prefix the process runs in.
     _appsInPrefix(ctx) {
         return this.remember(ctx, 'heroicApps', () => {
-            const keys = [ctx.prefix, canonical(ctx.env.STEAM_COMPAT_DATA_PATH)].filter(Boolean)
-                .map(pathKey).flatMap(p => p.endsWith('/pfx') ? [p, p.slice(0, -4)] : [p]);
+            const keys = this.prefixes(ctx).map(pathKey);
             return keys.length ? roots().flatMap(root => this._configs.get(`${root}/GamesConfig`))
                 .filter(c => c.prefix && keys.includes(c.prefix)).map(c => c.appName) : [];
         });

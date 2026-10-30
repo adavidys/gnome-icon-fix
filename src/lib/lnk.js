@@ -135,3 +135,9 @@ export function readLnk(path, prefix = prefixOf(path)) {
     const program = host(lnk.target) ?? relative;
     return program ? {program, icon: host(lnk.iconLocation)} : null;
 }
+
+// The program a path runs: the one a shortcut starts, else the path
+// itself. prefix: as for readLnk(), null for the one the file lies in.
+export function programOf(path, prefix = null) {
+    return path && /\.lnk$/i.test(path) ? readLnk(path, prefix ?? prefixOf(path))?.program ?? path : path;
+}

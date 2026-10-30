@@ -1,7 +1,9 @@
 import GLib from 'gi://GLib';
 
 import {HOME, eq, ok, short, test} from './harness.js';
-import {parseLnk, prefixOf, readLnk} from '../src/lib/lnk.js';
+import {parseLnk, prefixOf, programOf, readLnk} from '../src/lib/lnk.js';
+import {gameFromConfig} from '../src/sources/lutris.js';
+import {installedGames} from '../src/sources/heroic.js';
 import {exeIcon} from '../src/lib/peicon.js';
 
 const PREFIX = `${HOME}/.wine-game`;
@@ -44,4 +46,18 @@ test('lnk: icons of shortcuts', () => {
     eq(short(exeIcon(`${DESKTOP}/GoneIco.lnk`)), fromExe, 'its .ico gone');
     eq(short(exeIcon(`${DESKTOP}/Dll.lnk`)), fromExe, 'not a system library\'s');
     eq(exeIcon(`${DESKTOP}/NotLnk.lnk`), null);
+});
+
+test('lnk: a shortcut given as a game\'s program', () => {
+    const launcher = `${PREFIX}/drive_c/users/x/Start Menu/Launcher.lnk`;
+    eq(programOf(launcher), GAME);
+    eq(programOf(launcher, PREFIX), GAME);
+    eq(programOf(`${DESKTOP}/NotLnk.lnk`), `${DESKTOP}/NotLnk.lnk`, 'not readable as one');
+    eq(programOf(GAME), GAME);
+    eq(programOf(null), null);
+    // Lutris and Heroic: known by the program, in its folder.
+    eq(gameFromConfig('/x/lnk-game-1.yml', {game: {exe: launcher, prefix: PREFIX}}),
+        {slug: 'lnk-game', stem: 'game', prefix: PREFIX, dir: `${PREFIX}/drive_c/game`.toLowerCase(), exe: GAME});
+    eq(installedGames({games: [{app_name: 'l', title: 'L', install: {executable: launcher}}]}),
+        [{appName: 'l', title: 'L', dir: `${PREFIX}/drive_c/game`.toLowerCase(), exe: GAME}]);
 });
