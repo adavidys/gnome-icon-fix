@@ -2,7 +2,7 @@ import GdkPixbuf from 'gi://GdkPixbuf';
 import GLib from 'gi://GLib';
 
 import {HOME, PE, eq, ok, test} from './harness.js';
-import {exeInfo} from '../src/lib/peicon.js';
+import {exeIcon, exeInfo, forgetRead} from '../src/lib/peicon.js';
 
 const OUT = `${HOME}/peicon-out`;
 
@@ -85,4 +85,45 @@ test('peicon: results are cached until the file or its PNG changes', () => {
     // A cached "no icon" stays without a stat of the PNG.
     eq(exeInfo(`${PE}/noimage.exe`, OUT).icon, null);
     eq(exeInfo(`${PE}/noimage.exe`, OUT).icon, null);
+});
+
+test('peicon: what a program holds is saved for the next session', () => {
+    const exe = `${HOME}/saved-test.exe`;
+    GLib.file_set_contents(exe, GLib.file_get_contents(`${PE}/pe32.exe`)[1]);
+    const first = exeInfo(exe);
+    eq(first.name, 'Thirty Two');
+    const saved = first.icon.replace(/\.png$/, '.json');
+    ok(GLib.file_test(saved, GLib.FileTest.EXISTS));
+    // A new session: read from what was saved, without opening the program.
+    forgetRead();
+    GLib.chmod(exe, 0);
+    eq(exeInfo(exe), first);
+    GLib.chmod(exe, 0o644);
+    // Its PNG cleaned up: the program is read again.
+    forgetRead();
+    GLib.unlink(first.icon);
+    eq(exeInfo(exe), first);
+    ok(GLib.file_test(first.icon, GLib.FileTest.EXISTS));
+    // Not a program, or a program without an icon: saved as such too.
+    const notpe = `${HOME}/saved-notpe.exe`;
+    GLib.file_set_contents(notpe, 'MZ but nothing else');
+    eq(exeInfo(notpe), null);
+    forgetRead();
+    eq(exeInfo(notpe), null);
+    forgetRead();
+    eq(exeInfo(`${PE}/noimage.exe`).name, 'Name Only');
+    forgetRead();
+    eq(exeInfo(`${PE}/noimage.exe`), {icon: null, name: 'Name Only'});
+    eq(exeIcon(null), null);
+    // Nothing can be saved: read all the same.
+    GLib.unlink(saved);
+    forgetRead();
+    const cache = GLib.path_get_dirname(saved);
+    GLib.chmod(cache, 0o555);
+    try {
+        eq(exeInfo(exe), first);
+    } finally {
+        GLib.chmod(cache, 0o755);
+    }
+    ok(!GLib.file_test(saved, GLib.FileTest.EXISTS));
 });

@@ -9,7 +9,7 @@
 import GLib from 'gi://GLib';
 
 import {parseYaml} from '../lib/formats.js';
-import {exeInfo} from '../lib/peicon.js';
+import {exeIcon} from '../lib/peicon.js';
 import {exeStem, exists, listDir, readText} from '../lib/util.js';
 import {bottleFromConfig} from '../sources/bottles.js';
 import {GROUP, MARKER, ShortcutMirror, generatedFiles as filesOf, removeGenerated} from './base.js';
@@ -47,8 +47,7 @@ export function programShortcut(bottle, program, icons = iconDir()) {
         'flatpak', 'run', '--command=bottles-cli', BOTTLES_APP, 'run', '-p', quote(program.name), '-b', quote(ref),
     ].join(' '));
     const extracted = `${bottle.dir}/icons/${program.name}.png`;
-    const icon = exists(extracted) ? extracted
-        : program.path && exists(program.path) ? exeInfo(program.path, icons)?.icon ?? null : null;
+    const icon = exists(extracted) ? extracted : exeIcon(program.path, icons);
     kf.set_string(GROUP, 'Icon', icon ?? BOTTLES_APP);
     kf.set_string(GROUP, 'Categories', 'Application;');
     // What Bottles' own shortcuts set: Wine names the window after the .exe.

@@ -8,7 +8,7 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
 import * as log from './log.js';
-import {fileStamp} from './util.js';
+import {fileStamp, readJson} from './util.js';
 
 const RT_ICON = 3;
 const RT_GROUP_ICON = 14;
@@ -283,6 +283,11 @@ function cacheDir() {
 // "dir\npath" -> {stamp, info}
 const known = new Map();
 
+// Forgets what was read this session (what is saved on disk stays).
+export function forgetRead() {
+    known.clear();
+}
+
 // {icon: path to a PNG or null, name: product name or null} for a .exe,
 // or null if it isn't a readable Windows program. The PNG goes to the
 // cache unless dir says where (for icons a .desktop file will point at).
@@ -295,6 +300,20 @@ export function exeInfo(path, dir = cacheDir()) {
     if (cached?.stamp === stamp && (!cached.info?.icon || GLib.file_test(cached.info.icon, GLib.FileTest.EXISTS)))
         return cached.info;
 
+    // The PNG and what an earlier session found are named after the
+    // program and its stamp: a changed program is read again.
+    const sum = GLib.compute_checksum_for_string(GLib.ChecksumType.SHA1, `${path}\n${stamp}`, -1);
+    const png = GLib.build_filenamev([dir, `${sum}.png`]);
+    const found = GLib.build_filenamev([dir, `${sum}.json`]);
+    // Saved by an earlier session (in the cache only: a mirror's folder
+    // holds only its icons): no need to open the program again.
+    const saved = dir === cacheDir() ? readJson(found) : null;
+    if (saved && (!saved.icon || GLib.file_test(png, GLib.FileTest.EXISTS))) {
+        const before = saved.program ? {icon: saved.icon ? png : null, name: saved.name} : null;
+        known.set(`${dir}\n${path}`, {stamp, info: before});
+        return before;
+    }
+
     let info = null;
     let reader = null;
     const start = Date.now();
@@ -303,8 +322,7 @@ export function exeInfo(path, dir = cacheDir()) {
         const section = resourceSection(reader);
         if (section) {
             const name = versionString(section, ['ProductName', 'FileDescription']);
-            const sum = GLib.compute_checksum_for_string(GLib.ChecksumType.SHA1, `${path}\n${stamp}`, -1);
-            let icon = GLib.build_filenamev([dir, `${sum}.png`]);
+            let icon = png;
             if (!GLib.file_test(icon, GLib.FileTest.EXISTS)) {
                 const pixbuf = bestIcon(section);
                 if (pixbuf) {
@@ -322,6 +340,14 @@ export function exeInfo(path, dir = cacheDir()) {
     }
     reader?.close();
     known.set(`${dir}\n${path}`, {stamp, info});
+    if (dir === cacheDir()) {
+        try {
+            GLib.mkdir_with_parents(dir, 0o755);
+            GLib.file_set_contents(found, JSON.stringify({program: !!info, icon: !!info?.icon, name: info?.name ?? null}));
+        } catch (e) {
+            log.debug(`can't save what ${path} holds: ${e}`);
+        }
+    }
     return info;
 }
 

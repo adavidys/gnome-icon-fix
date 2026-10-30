@@ -8,7 +8,7 @@
 
 import {tryCall} from './appindex.js';
 import {GENERIC_BINARIES, isWineProcess, mappedProgram, programFromArgv, winePrefixOf, wineToHost} from './process.js';
-import {basename, canonical, exeStem, normalize, pathKey} from './util.js';
+import {basename, canonical, exeStem, exists, normalize, pathKey} from './util.js';
 
 const NO_PROCESS = {pid: 0, argv: [], exe: null, cwd: null, env: {}};
 
@@ -38,8 +38,12 @@ export function windowContext(hints) {
             paths.add(host);
     };
     const program = programFromArgv(proc.argv);
-    // The .exe a Wine process really runs, wherever its drive letter points.
-    const mapped = wine && program?.path ? mappedProgram(proc.pid, program.path) : null;
+    // The .exe a Wine process really runs, when the drive letter in its argv
+    // points nowhere this side can see (umu gives the game folder a letter
+    // of its own, inside the sandbox). Reading what it has mapped costs
+    // more than everything else here, so only then.
+    const mapped = wine && program?.path && !exists(wineToHost(program.path, prefix))
+        ? mappedProgram(proc.pid, program.path) : null;
     if (mapped)
         paths.add(mapped);
     if (program?.flatpak)

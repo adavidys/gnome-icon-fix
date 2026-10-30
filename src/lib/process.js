@@ -101,16 +101,17 @@ export function mappedProgram(pid, program) {
     } catch {
         return null;
     }
-    const name = `/${basename(program).toLowerCase()}`;
-    for (const line of maps.split('\n')) {
-        // address perms offset dev inode path (which may contain spaces)
-        const path = line.match(/^\S+ \S+ \S+ \S+ \S+\s+(\/.+)$/)?.[1];
-        if (!path?.toLowerCase().endsWith(name))
-            continue;
+    // One search over the whole file for the lines that end in its name
+    // (address perms offset dev inode path, which may contain spaces): a
+    // game maps thousands of files.
+    const name = basename(program).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const line = new RegExp(`^\\S+ \\S+ \\S+ \\S+ \\S+\\s+(/.*/${name})$`, 'gim');
+    let m;
+    while ((m = line.exec(maps))) {
         // A sandboxed process has its own mount namespace, but Flatpak and
         // Steam's runtime keep the home folder at the same place.
-        if (exists(path))
-            return canonical(path);
+        if (exists(m[1]))
+            return canonical(m[1]);
     }
     return null;
 }

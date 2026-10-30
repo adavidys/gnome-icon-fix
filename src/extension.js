@@ -16,6 +16,7 @@ import {Tracer, clearTrace} from './debug/trace.js';
 import {AppIndex, parseExec, tryCall} from './lib/appindex.js';
 import * as log from './lib/log.js';
 import {matchTitle, matchWindow} from './lib/matcher.js';
+import {forgetRead} from './lib/peicon.js';
 import {readProcess} from './lib/process.js';
 import {LAUNCHER_SANDBOXES, findSandboxedIcon} from './lib/util.js';
 import {FlatpakBottlesMirror} from './mirror/bottles-flatpak.js';
@@ -124,6 +125,7 @@ export default class IconFixExtension extends Extension {
         this._splitter.destroy();
         this._splitter = null;
         this._unpatch();
+        forgetRead();
 
         // Keep the generated shortcuts: disable() also runs on screen lock.
         for (const mirror of this._mirrors.values())
