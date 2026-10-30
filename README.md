@@ -41,7 +41,7 @@ It works with the dock (including Dash to Dock), Alt+Tab and the overview, and h
 
 ### Where icons and names come from
 
-The **General** tab of the preferences sets, for windows GNOME can't place by itself, which icon and which name come first. Drag the rows (or use their arrows) to put them in order; the first one a game has is used:
+The **General** tab of the preferences sets, for windows GNOME can't place by itself, which icon and which name come first. Drag the rows to put them in order; the first one a game has is used:
 
 - **.desktop**: the `Icon=` and `Name=` of the game's `.desktop` file, or, without one, what its launcher knows (Lutris' icon, Heroic's title…)
 - **.exe**: the icon and product name inside a Windows game's `.exe` (else its file name)

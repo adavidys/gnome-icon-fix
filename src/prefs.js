@@ -67,19 +67,11 @@ const CSS = `
 }
 `;
 
-// A row of an order list (_orderGroup()): kind at position i of count;
-// move(kind, position) reorders.
-function orderRow(kind, i, count, {title, subtitle}, move) {
+// A row of an order list (_orderGroup()), dragged to reorder: kind at
+// position i; move(kind, position) reorders.
+function orderRow(kind, i, {title, subtitle}, move) {
     const row = new Adw.ActionRow({title: `${i + 1}. ${title}`, subtitle});
     row.add_prefix(new Gtk.Image({icon_name: 'list-drag-handle-symbolic', css_classes: ['dim-label']}));
-    for (const [icon, to, label] of [['go-up-symbolic', i - 1, 'Move up'], ['go-down-symbolic', i + 1, 'Move down']]) {
-        const button = new Gtk.Button({
-            icon_name: icon, valign: Gtk.Align.CENTER, css_classes: ['flat'], tooltip_text: label,
-            sensitive: to >= 0 && to < count,
-        });
-        button.connect('clicked', () => move(kind, to));
-        row.add_suffix(button);
-    }
 
     const drag = new Gtk.DragSource({actions: Gdk.DragAction.MOVE});
     drag.connect('prepare', () => Gdk.ContentProvider.new_for_value(kind));
@@ -235,8 +227,8 @@ export default class IconFixPreferences extends ExtensionPreferences {
     }
 
     // One optional shortcut mirror: its switch and the files it made.
-    // A list to put .desktop, .exe and GNOME's own in order, by dragging
-    // the rows or with their arrows; kinds: their titles and subtitles.
+    // A list to put .desktop, .exe and GNOME's own in order by dragging the
+    // rows; kinds: their titles and subtitles.
     _orderGroup(settings, key, title, kinds) {
         const group = new Adw.PreferencesGroup({
             title,
@@ -261,7 +253,7 @@ export default class IconFixPreferences extends ExtensionPreferences {
                 next.splice(to, 0, kind);
                 settings.set_strv(key, next);
             };
-            order.forEach((kind, i) => list.append(orderRow(kind, i, order.length, kinds[kind], move)));
+            order.forEach((kind, i) => list.append(orderRow(kind, i, kinds[kind], move)));
         };
         settings.connect(`changed::${key}`, fill);
         fill();
