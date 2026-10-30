@@ -2,12 +2,12 @@
 // wine start /unix <...>.lnk`) and hand-written ones (`wine C:\...\game.exe`).
 // The same .exe name in two prefixes is told apart by the prefix.
 
-import {execPrefix, isWineBinary, programFromArgv} from '../lib/process.js';
+import {readLnk} from '../lib/lnk.js';
+import {execPrefix, isWineBinary, programFromArgv, wineToHost} from '../lib/process.js';
 import {exeStem, normalize} from '../lib/util.js';
 import {LauncherSource} from './launcher.js';
 
-// A .lnk is usually named after the program, not after its .exe: keys
-// compare normalized ("Foo Bar.lnk" and foobar.exe).
+// Keys compare normalized ("Foo Bar.exe" and foobar.exe).
 function key(prefix, stem) {
     return `${prefix}\n${normalize(stem)}`;
 }
@@ -22,9 +22,15 @@ export class WineSource extends LauncherSource {
         const program = wine < 0 ? null : programFromArgv(argv.slice(wine));
         if (!program?.path)
             return null;
-        const stem = exeStem(program.path);
-        index.add(index.exec, stem, entry.id);
-        return [key(execPrefix(argv.slice(0, wine)), stem)];
+        const prefix = execPrefix(argv.slice(0, wine));
+        // A shortcut by the program it starts, and by its own name: menu
+        // shortcuts are often named like it.
+        const file = /\.lnk$/i.test(program.path) ? wineToHost(program.path, prefix) : null;
+        const lnk = file ? readLnk(file, prefix) : null;
+        const stems = [...new Set([lnk && exeStem(lnk.program), exeStem(program.path)].filter(Boolean))];
+        for (const stem of stems)
+            index.add(index.exec, stem, entry.id);
+        return stems.map(stem => key(prefix, stem));
     }
 
     windowKeys(ctx) {

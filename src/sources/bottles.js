@@ -6,6 +6,7 @@
 // executable, and a running program's WINEPREFIX is the bottle's folder.
 
 import {parseYaml} from '../lib/formats.js';
+import {readLnk} from '../lib/lnk.js';
 import {exeIcon} from '../lib/peicon.js';
 import {StampCache, basename, canonical, dataDir, exeStem, exists, listDir, readText, sandboxDir} from '../lib/util.js';
 import {LauncherSource} from './launcher.js';
@@ -57,9 +58,11 @@ export function bottleFromConfig(config) {
     for (const program of Object.values(config.External_Programs ?? {})) {
         const exe = program?.executable || program?.path;
         if (program?.name && typeof exe === 'string') {
+            // A shortcut (.lnk) is known by the program it starts.
+            const lnk = /\.lnk$/i.test(exe) && typeof program.path === 'string' ? readLnk(program.path) : null;
             programs.push({
                 name: program.name,
-                stem: exeStem(exe),
+                stem: exeStem(lnk?.program ?? exe),
                 path: canonical(program.path),
                 removed: program.removed === 'true',
             });

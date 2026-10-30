@@ -12,10 +12,11 @@ export class ExeSource {
         this.name = 'exe';
     }
 
-    // `[env WINEPREFIX=...] wine C:\\Games\\game.exe`, `wine /path/game.exe`
+    // `[env WINEPREFIX=...] wine C:\\Games\\game.exe`, `wine /path/game.exe`,
+    // `wine start /unix /path/Game.lnk`
     entryIcon(_entry, argv) {
         const program = programFromArgv(argv)?.path;
-        if (!program || !/\.exe$/i.test(program))
+        if (!program || !/\.(exe|lnk)$/i.test(program))
             return null;
         return exeIcon(wineToHost(program, execPrefix(argv)));
     }

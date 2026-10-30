@@ -19,6 +19,47 @@ h=int(sys.argv[1])
 def c(k,d): return struct.pack(">I",len(d))+k+d+struct.pack(">I",zlib.crc32(k+d)&0xffffffff)
 sys.stdout.buffer.write(b"\x89PNG\r\n\x1a\n"+c(b"IHDR",struct.pack(">IIBBBBB",4,h,8,6,0,0,0))+c(b"IDAT",zlib.compress(b"".join(b"\0"+b"\x10\x20\x30\xff"*4 for _ in range(h))))+c(b"IEND",b""))' "${2:-4}" > "$1"; }
 
+lnk() { # lnk FILE JSON: a Windows shortcut; JSON: {target, wide, suffix, idlist, relative, workdir, name, args, icon}
+python3 - "$@" <<'PYEOF'
+import json, struct, sys
+path, spec = sys.argv[1], json.loads(sys.argv[2])
+def ansi(s): return s.encode('cp1252') + (b'' if spec.get('noterm') else b'\0')
+def wide(s): return s.encode('utf-16-le') + b'\0\0'
+flags = 0 if spec.get('ansi') else 0x80
+body = b''
+if spec.get('idlist'):
+    flags |= 0x1
+    body += struct.pack('<H', 4) + b'\x02\x00\x00\x00'
+if 'target' in spec:
+    flags |= 0x2
+    base, suffix = spec['target'], spec.get('suffix', '')
+    volume = struct.pack('<IIII', 16, 3, 0, 16)
+    if spec.get('wide'):
+        head = 0x24
+        fixed = head + len(volume)
+        strings = ansi('') + ansi('')
+        wbase = fixed + len(strings)
+        wsuffix = wbase + len(wide(base))
+        info = struct.pack('<IIIIIIIII', 0, head, spec.get('flags', 1), head, fixed, 0, fixed + 1, wbase, wsuffix)
+        info += volume + strings + wide(base) + wide(suffix)
+    else:
+        head = 0x1c
+        fixed = head + len(volume)
+        info = struct.pack('<IIIIIII', 0, head, spec.get('flags', 1), head, fixed, 0, fixed + len(ansi(base)))
+        info += volume + ansi(base) + (b'' if spec.get('noterm') else ansi(suffix))
+    info = struct.pack('<I', len(info)) + info[4:]
+    body += info
+for flag, key in [(0x4, 'name'), (0x8, 'relative'), (0x10, 'workdir'), (0x20, 'args'), (0x40, 'icon')]:
+    if key in spec:
+        flags |= flag
+        body += struct.pack('<H', len(spec[key])) + spec[key].encode('cp1252' if spec.get('ansi') else 'utf-16-le')
+header = struct.pack('<I', 0x4c) + bytes([1, 0x14, 2, 0, 0, 0, 0, 0, 0xc0, 0, 0, 0, 0, 0, 0, 0x46]) + struct.pack('<I', flags)
+header += b'\0' * (0x38 - len(header)) + struct.pack('<i', spec.get('index', 0)) + b'\0' * (0x4c - 0x3c)
+data = header + body + spec.get('extra', '').encode()
+open(path, 'wb').write(data[:spec['cut']] if 'cut' in spec else data)
+PYEOF
+}
+
 vdf_shortcuts() { # vdf_shortcuts FILE EXE [ICON]: one non-Steam game, app id 2236688360
 python3 - "$@" <<'EOF'
 import sys, struct
@@ -186,6 +227,10 @@ External_Programs:
     name: Broken
     executable: Broken.exe
     path: $G/Broken.exe
+  stu:
+    name: Via Shortcut
+    executable: Via.lnk
+    path: $G/Via.lnk
 EOF
 [ -n "$2" ] && png "$1/icons/Some Game.png"
 true
@@ -203,6 +248,26 @@ cp "$PE/bmp8.exe" "$F/Elsewhere/other.exe"
 ln -s ../drive_c "$W/dosdevices/c:"
 ln -s "$F/Elsewhere" "$W/dosdevices/d:"
 mkdir -p "$F/.wine/drive_c"
+# Windows shortcuts in it (Start Menu, desktop), good and broken
+D="$W/drive_c/users/x/Desktop"
+mkdir -p "$W/drive_c/users/x/Start Menu" "$D"
+png "$W/drive_c/Game/game.ico"
+lnk "$W/drive_c/users/x/Start Menu/Launcher.lnk" '{"target": "C:\\Game\\game.exe", "workdir": "C:\\Game"}'
+lnk "$D/Wide.lnk" '{"target": "C:\\Game", "suffix": "game.exe", "wide": true, "idlist": true, "name": "A game", "args": "-x", "icon": "C:\\Game\\game.exe"}'
+lnk "$D/Root.lnk" '{"target": "C:\\", "suffix": "Game\\game.exe"}'
+lnk "$D/Relative.lnk" '{"relative": "..\\..\\..\\Game\\game.exe"}'
+lnk "$D/Ico.lnk" '{"target": "C:\\Game\\game.exe", "workdir": "C:\\Game\u0000", "icon": "C:\\Game\\game.ico\u0000"}'
+lnk "$D/GoneIco.lnk" '{"target": "C:\\Game\\game.exe", "icon": "C:\\Game\\gone.ico"}'
+lnk "$D/Dll.lnk" '{"target": "C:\\Game\\game.exe", "icon": "C:\\windows\\system32\\shell32.dll", "index": 3}'
+lnk "$D/Env.lnk" '{"target": "%ProgramFiles%\\x.exe", "icon": "%SystemRoot%\\x.exe"}'
+lnk "$D/Network.lnk" '{"target": "\\\\server\\x.exe", "flags": 2}'
+lnk "$D/Truncated.lnk" '{"name": "a long name", "cut": 90}'
+lnk "$D/Unterminated.lnk" '{"target": "C:\\Game\\game.exe", "noterm": true}'
+lnk "$D/Ansi.lnk" '{"target": "C:\\Game\\game.exe", "ansi": true, "workdir": "C:\\Game", "icon": "C:\\Game\\game.ico"}'
+lnk "$D/Huge.lnk" "{\"target\": \"C:\\\\Game\\\\game.exe\", \"extra\": \"$(head -c 70000 /dev/zero | tr '\0' x)\"}"
+printf 'not a shortcut, but longer than its header would be' > "$D/NotLnk.lnk"
+# A Bottles program given as a shortcut, to a program outside the bottle
+lnk "$G/Via.lnk" "{\"target\": \"Z:$(echo "$F/Elsewhere/other.exe" | sed 's|/|\\\\|g')\"}"
 
 # --- AppImage
 mkdir -p "$F/Applications"

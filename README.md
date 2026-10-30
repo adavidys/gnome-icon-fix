@@ -27,7 +27,7 @@ When GNOME can't place a window, Icon Fix finds the matching `.desktop` file the
 | **Heroic** (Epic, GOG, Amazon, sideloaded) | `HEROIC_APP_NAME`, or the install folder from Heroic's `installed.json` | Heroic's icon and the game's title |
 | **Lutris** | The game's `exe` and Wine prefix from its Lutris config, or its folder | Lutris' `lutris_<slug>` icon |
 | **Bottles** | The program's `.exe` from `bottle.yml` together with `WINEPREFIX`, so two bottles with the same `Launcher.exe` stay apart | The icon Bottles extracted from the `.exe` |
-| **Wine** | Menu entries made by Wine itself, matched by `.exe` and prefix | |
+| **Wine** | Menu entries made by Wine itself, matched by `.exe` and prefix, also through the Windows shortcut (`.lnk`) they start | |
 | **Snap**, **AppImage**, **Flatpak** | `SNAP_NAME`, `APPIMAGE`, the Flatpak app ID | |
 
 Then, for any app:
@@ -81,7 +81,7 @@ The native and Flathub versions of a launcher can be installed side by side: a g
 
 ### Windows games without an icon
 
-When nothing else knows a Wine game's icon, Icon Fix reads the one stored in its `.exe` (and its product name, if it has one) and caches it as a PNG in `~/.cache/icon-fix`. The game files are only read, never changed. Which `.exe` a game runs comes from the kernel (the files the Wine process has mapped), so it's found even when Proton or umu show it under a drive letter of their own.
+When nothing else knows a Wine game's icon, Icon Fix reads the one stored in its `.exe` (and its product name, if it has one) and caches it as a PNG in `~/.cache/icon-fix`. A Windows shortcut (`.lnk`) a menu entry or launcher points at is followed to the program it starts, or to the icon it names. The game files are only read, never changed. Which `.exe` a game runs comes from the kernel (the files the Wine process has mapped), so it's found even when Proton or umu show it under a drive letter of their own.
 
 A Steam game with no shortcut icon gets the icon Steam shows for it in its library. That one is small, so games that run through Proton keep the sharper icon from their `.exe`.
 

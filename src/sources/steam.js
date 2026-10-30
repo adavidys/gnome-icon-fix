@@ -69,7 +69,7 @@ export function shortcutLook(shortcut, dir) {
     const name = shortcut.name?.replace(/\.exe$/i, '') || null;
     let icon = null;
     for (const file of [shortcut.icon, shortcut.exe].filter(Boolean)) {
-        if (/\.exe$/i.test(file))
+        if (/\.(exe|lnk)$/i.test(file))
             icon = exeIcon(file, dir);
         else if (/\.(png|svg|jpe?g)$/i.test(file) && exists(file))
             icon = file;

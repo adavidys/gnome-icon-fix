@@ -7,8 +7,9 @@ import GdkPixbuf from 'gi://GdkPixbuf';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
+import {readLnk} from './lnk.js';
 import * as log from './log.js';
-import {fileStamp, readJson} from './util.js';
+import {exists, fileStamp, readJson} from './util.js';
 
 const RT_ICON = 3;
 const RT_GROUP_ICON = 14;
@@ -351,7 +352,21 @@ export function exeInfo(path, dir = cacheDir()) {
     return info;
 }
 
-// Just the icon of a program (a PNG path), or null.
+// Just the icon of a program (a PNG path), or null. For a Windows
+// shortcut (.lnk): the icon it names, an .ico or a program's, else its
+// program's.
 export function exeIcon(path, dir) {
-    return path ? exeInfo(path, dir)?.icon ?? null : null;
+    if (!path)
+        return null;
+    const icon = program => exeInfo(program, dir)?.icon ?? null;
+    if (!/\.lnk$/i.test(path))
+        return icon(path);
+    // Not followed further: a shortcut to a shortcut isn't a program.
+    const lnk = readLnk(path);
+    if (!lnk)
+        return null;
+    if (/\.ico$/i.test(lnk.icon ?? '') && exists(lnk.icon))
+        return lnk.icon;
+    // Not a system library's stock icons (shell32.dll...).
+    return (/\.exe$/i.test(lnk.icon ?? '') ? icon(lnk.icon) : null) ?? icon(lnk.program);
 }

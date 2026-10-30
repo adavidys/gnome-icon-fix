@@ -52,12 +52,14 @@ import {WineSource} from './wine.js';
 
 export function createSources() {
     return [
+        // First: a menu entry for exactly this program in exactly this
+        // prefix beats the launchers' guesses by folder.
+        new WineSource(),
         // Before Steam: a Heroic game may also carry a Steam id via umu.
         new HeroicSource(),
         new SteamSource(),
         new BottlesSource(),
         new LutrisSource(),
-        new WineSource(),
         new PackagingSource(),
         // Fallback only: whatever the launchers know comes first.
         new ExeSource(),

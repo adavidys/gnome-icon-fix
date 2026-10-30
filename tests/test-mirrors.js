@@ -166,6 +166,7 @@ test('mirror: Flatpak Bottles shortcuts', () => {
             'bottles-flatpak-dupes-some-game.desktop', 'bottles-flatpak-dupes-x.desktop',
             'bottles-flatpak-somebottle-broken.desktop', 'bottles-flatpak-somebottle-rel.desktop',
             'bottles-flatpak-somebottle-some-game.desktop', 'bottles-flatpak-somebottle-tool-pro-co.desktop',
+            'bottles-flatpak-somebottle-via-shortcut.desktop',
         ]);
         ok(read(`${APPS}/bottles-flatpak-dupes-some-game.desktop`).includes('Name=Some-Game\n'), 'the first one wins');
         ok(read(`${APPS}/bottles-flatpak-somebottle-some-game.desktop`).includes(`Icon=${root}/SomeBottle/icons/Some Game.png`));

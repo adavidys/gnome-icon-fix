@@ -8,6 +8,7 @@ import './test-util.js';
 import './test-formats.js';
 import './test-process.js';
 import './test-peicon.js';
+import './test-lnk.js';
 import './test-log.js';
 import './test-appindex.js';
 import './test-sources.js';

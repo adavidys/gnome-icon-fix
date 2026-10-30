@@ -25,7 +25,7 @@ const wine = (env = {}, extra = {}) => ctx({proc: {pid: 0, argv: [WGAME], exe: '
 const index = entries => new AppIndex(entries, sources);
 
 test('registry: every source, and the variables they want', () => {
-    eq(sources.map(s => s.name), ['heroic', 'steam', 'bottles', 'lutris', 'wine', 'packaging', 'exe']);
+    eq(sources.map(s => s.name), ['wine', 'heroic', 'steam', 'bottles', 'lutris', 'packaging', 'exe']);
     const keys = envKeys(sources);
     for (const key of ['WINEPREFIX', 'HEROIC_APP_NAME', 'SteamAppId', 'BOTTLE', 'LUTRIS_GAME_UUID', 'APPIMAGE'])
         ok(keys.has(key), key);
@@ -192,7 +192,8 @@ test('bottles: shortcuts, launch detection, games', () => {
     eq(b.identify(tool, idx), {id: 'by-path.desktop'}, 'by the bottle\'s path');
     const other = ctx({proc: {pid: 0, argv: ['C:\\Games\\Other.exe'], exe: '/usr/bin/wine', cwd: '/', env: {WINEPREFIX: BOTTLE}}});
     eq(b.identify(other, idx), {id: 'by-exe.desktop'}, 'by folder name and .exe');
-    eq(b.fallback(other), null, 'not a program of the bottle');
+    // Its program "Via Shortcut" is a .lnk to Other.exe.
+    eq(b.fallback(other), {icon: `${BOTTLE}/icons/Via Shortcut.png`, name: 'Via Shortcut'}, 'a program given as a shortcut');
     eq(b.identify(ctx({proc: {pid: 0, argv: ['C:\\nope.exe'], exe: '/usr/bin/wine', cwd: '/', env: {WINEPREFIX: BOTTLE}}}), idx), null);
     eq(b.launched(wine({BOTTLE: 'x'})), true);
     eq(b.launched(wine({})), false);
@@ -311,6 +312,8 @@ test('wine: menu entries and prefixes', () => {
     const idx = index([
         {id: 'game.desktop', exec: `env WINEPREFIX="${prefix}" wine C:\\\\Game\\\\game.exe`},
         {id: 'lnk.desktop', exec: `env WINEPREFIX=${prefix} wine start /unix ${prefix}/drive_c/users/x/Start\\ Menu/Other\\ Game.lnk`},
+        {id: 'elsewhere.desktop', exec: `env WINEPREFIX=${prefix} wine start "Q:\\\\x\\\\Y.lnk"`},
+        {id: 'launcher.desktop', exec: `env WINEPREFIX=${prefix} wine start /unix "${prefix}/drive_c/users/x/Start Menu/Launcher.lnk"`},
         {id: 'default.desktop', exec: 'wine "C:\\\\Program Files\\\\App\\\\app.exe"'},
         {id: 'bare.desktop', exec: 'wine'},
         {id: 'no-wine.desktop', exec: '/usr/bin/x'},
@@ -320,6 +323,11 @@ test('wine: menu entries and prefixes', () => {
     const run = (argv, env) => ctx({proc: {pid: 0, argv, exe: '/usr/bin/wine64-preloader', cwd: '/', env}});
     eq(w.identify(run(['C:\\Game\\game.exe'], {WINEPREFIX: prefix}), idx), {id: 'game.desktop'});
     eq(w.identify(run(['C:\\x\\OtherGame.exe'], {WINEPREFIX: prefix}), idx), {id: 'lnk.desktop'}, '.lnk named like the .exe');
+    // Launcher.lnk starts game.exe; game.desktop, first, has that key.
+    eq(idx.map('wine').get(`${prefix}\nlauncher`), 'launcher.desktop', 'a .lnk by its own name');
+    eq(idx.map('wine').get(`native\0${prefix}\ngame`), 'game.desktop', 'and by its program');
+    eq(idx.exec.get('launcher'), 'launcher.desktop');
+    eq(idx.exec.get('y'), 'elsewhere.desktop', 'a shortcut on a drive the prefix doesn\'t have');
     eq(w.identify(run(['C:\\Program Files\\App\\app.exe'], {}), idx), {id: 'default.desktop'}, 'default prefix');
     eq(w.identify(run(['C:\\nope.exe'], {WINEPREFIX: prefix}), idx), null);
     eq(w.identify(ctx({proc: {pid: 0, argv: ['/usr/bin/x'], exe: '/usr/bin/x', cwd: '/', env: {}}}), idx), null, 'not Wine');
