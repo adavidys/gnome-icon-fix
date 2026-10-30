@@ -264,6 +264,11 @@ export class WindowSplitter {
         this._queueRefresh();
     }
 
+    // Whether app has windows moved to it.
+    hosts(app) {
+        return [...this._moved.values()].some(m => m.app === app);
+    }
+
     _targets() {
         return new Set([...this._moved.values()].map(m => m.app));
     }

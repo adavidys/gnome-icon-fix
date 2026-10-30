@@ -11,6 +11,16 @@
       <summary>Add programs from Flatpak Bottles to the app grid and search</summary>
       <description>Writes a shortcut for every program of every bottle of Bottles from Flathub (com.usebottles.bottles) into ~/.local/share/applications as bottles-flatpak-*.desktop files, since Bottles can't create them from its sandbox. Turning it off removes them again.</description>
     </key>
+    <key name="icon-order" type="as">
+      <default>['desktop', 'exe', 'default']</default>
+      <summary>Where a game's icon comes from, first choice first</summary>
+      <description>For windows GNOME can't place by itself: "desktop" is the icon of the game's .desktop file (or the one its launcher keeps), "exe" the icon inside its Windows program, "default" what GNOME shows by itself. The first one there is is used; nothing after "default" ever is.</description>
+    </key>
+    <key name="name-order" type="as">
+      <default>['desktop', 'exe', 'default']</default>
+      <summary>Where a game's name comes from, first choice first</summary>
+      <description>As icon-order, for the name: the Name of the game's .desktop file (or its launcher's title for it), the product name inside its Windows program (else its file name), or GNOME's own.</description>
+    </key>
     <key name="debug-logging" type="b">
       <default>false</default>
       <summary>Write debug details to the system journal</summary>

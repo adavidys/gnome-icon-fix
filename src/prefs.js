@@ -1,16 +1,19 @@
-// Preferences window: a General page with the optional Flatpak Steam and
-// Flatpak Bottles shortcuts and the files each created, and a support page
-// with a coin switcher, QR code and copyable address.
+// Preferences window: a General page with where icons and names come
+// from (draggable orders), a Flatpak page with the optional Flatpak Steam
+// and Flatpak Bottles shortcuts and the files each created, the Debug page,
+// and a support page with a coin switcher, QR code and copyable address.
 
 import Adw from 'gi://Adw';
 import Gdk from 'gi://Gdk';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import GObject from 'gi://GObject';
 import Gtk from 'gi://Gtk';
 
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 import {debugPage} from './debug/page.js';
+import {KINDS, normalizeOrder} from './lib/look.js';
 import * as bottlesMirror from './mirror/bottles-flatpak.js';
 import * as steamMirror from './mirror/steam-flatpak.js';
 
@@ -41,6 +44,18 @@ const COINS = [
 
 const QR_SIZE = 220;
 
+// The rows of the icon and name orders (lib/look.js)
+const ICON_KINDS = {
+    desktop: {title: '.desktop icon', subtitle: 'Icon= of the game\'s .desktop file, or the icon its launcher keeps for it'},
+    exe: {title: '.exe icon', subtitle: 'The icon inside a Windows game\'s .exe'},
+    default: {title: 'Default icon', subtitle: 'What GNOME shows by itself: the launcher\'s icon, or a generic one'},
+};
+const NAME_KINDS = {
+    desktop: {title: '.desktop name', subtitle: 'Name= of the game\'s .desktop file, or the title its launcher has for it'},
+    exe: {title: '.exe name', subtitle: 'The product name inside a Windows game\'s .exe, else its file name'},
+    default: {title: 'Default name', subtitle: 'What GNOME shows by itself: the launcher\'s name, or the window\'s'},
+};
+
 // The mirror writes in the Shell's process; let it settle before rereading.
 const REFRESH_DELAY_MS = 500;
 
@@ -52,6 +67,34 @@ const CSS = `
 }
 `;
 
+// A row of an order list (_orderGroup()): kind at position i of count;
+// move(kind, position) reorders.
+function orderRow(kind, i, count, {title, subtitle}, move) {
+    const row = new Adw.ActionRow({title: `${i + 1}. ${title}`, subtitle});
+    row.add_prefix(new Gtk.Image({icon_name: 'list-drag-handle-symbolic', css_classes: ['dim-label']}));
+    for (const [icon, to, label] of [['go-up-symbolic', i - 1, 'Move up'], ['go-down-symbolic', i + 1, 'Move down']]) {
+        const button = new Gtk.Button({
+            icon_name: icon, valign: Gtk.Align.CENTER, css_classes: ['flat'], tooltip_text: label,
+            sensitive: to >= 0 && to < count,
+        });
+        button.connect('clicked', () => move(kind, to));
+        row.add_suffix(button);
+    }
+
+    const drag = new Gtk.DragSource({actions: Gdk.DragAction.MOVE});
+    drag.connect('prepare', () => Gdk.ContentProvider.new_for_value(kind));
+    drag.connect('drag-begin', source => source.set_icon(new Gtk.WidgetPaintable({widget: row}), 0, 0));
+    row.add_controller(drag);
+    const drop = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE);
+    drop.connect('drop', (_target, value) => {
+        if (value !== kind)
+            move(value, i);
+        return true;
+    });
+    row.add_controller(drop);
+    return row;
+}
+
 export default class IconFixPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const provider = new Gtk.CssProvider();
@@ -59,15 +102,23 @@ export default class IconFixPreferences extends ExtensionPreferences {
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(),
             provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
 
-        window.set_default_size(520, 640);
+        window.set_default_size(640, 700);
 
+        const settings = this.getSettings();
         const general = new Adw.PreferencesPage({
             title: 'General',
             icon_name: 'preferences-system-symbolic',
         });
         window.add(general);
+        general.add(this._orderGroup(settings, 'icon-order', 'Icons', ICON_KINDS));
+        general.add(this._orderGroup(settings, 'name-order', 'Names', NAME_KINDS));
 
-        general.add(this._mirrorGroup(window, {
+        const flatpak = new Adw.PreferencesPage({
+            title: 'Flatpak',
+            icon_name: 'package-x-generic-symbolic',
+        });
+        window.add(flatpak);
+        flatpak.add(this._mirrorGroup(window, {
             title: 'Flatpak Steam',
             description: 'Steam from Flathub keeps its game shortcuts inside its sandbox, ' +
                 'so GNOME can\'t find them. This copies them to ' +
@@ -77,7 +128,7 @@ export default class IconFixPreferences extends ExtensionPreferences {
             switchTitle: 'Show Flatpak Steam games',
             mirror: steamMirror,
         }));
-        general.add(this._mirrorGroup(window, {
+        flatpak.add(this._mirrorGroup(window, {
             title: 'Flatpak Bottles',
             description: 'Bottles from Flathub can\'t add its programs to the app grid ' +
                 'from its sandbox. This creates a shortcut for each program in your bottles, ' +
@@ -88,23 +139,23 @@ export default class IconFixPreferences extends ExtensionPreferences {
             mirror: bottlesMirror,
         }));
 
+        // Debug tab: how GNOME picked each window's app, step by step, and
+        // what goes to the journal.
+        const debug = debugPage(window, settings);
         const troubleshooting = new Adw.PreferencesGroup({
             title: 'Troubleshooting',
             description: 'Errors are always written to the system journal. To see them, ' +
                 'and with this on, how each window was matched: ' +
                 'journalctl --user -f | grep \'Icon Fix\'',
         });
-        general.add(troubleshooting);
         const debugRow = new Adw.SwitchRow({
             title: 'Debug logging',
             subtitle: 'Write how windows are matched and which files are written',
         });
-        this.getSettings().bind('debug-logging', debugRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        settings.bind('debug-logging', debugRow, 'active', Gio.SettingsBindFlags.DEFAULT);
         troubleshooting.add(debugRow);
-
-        // Debug tab: how GNOME picked each window's app, step by step.
-        window.add(debugPage(window, this.getSettings()));
-
+        debug.add(troubleshooting);
+        window.add(debug);
         const page = new Adw.PreferencesPage({
             title: 'Support',
             icon_name: 'emblem-favorite-symbolic',
@@ -184,6 +235,39 @@ export default class IconFixPreferences extends ExtensionPreferences {
     }
 
     // One optional shortcut mirror: its switch and the files it made.
+    // A list to put .desktop, .exe and GNOME's own in order, by dragging
+    // the rows or with their arrows; kinds: their titles and subtitles.
+    _orderGroup(settings, key, title, kinds) {
+        const group = new Adw.PreferencesGroup({
+            title,
+            description: 'For games GNOME can\'t match by itself. Drag to reorder: ' +
+                'the first one a game has is used, and nothing below Default ever is.',
+        });
+        const reset = new Gtk.Button({
+            icon_name: 'edit-undo-symbolic', valign: Gtk.Align.CENTER, css_classes: ['flat'],
+            tooltip_text: 'Back to the usual order',
+        });
+        reset.connect('clicked', () => settings.reset(key));
+        group.set_header_suffix(reset);
+        const list = new Gtk.ListBox({selection_mode: Gtk.SelectionMode.NONE, css_classes: ['boxed-list']});
+        group.add(list);
+
+        const fill = () => {
+            list.remove_all();
+            const order = normalizeOrder(settings.get_strv(key));
+            reset.sensitive = order.join() !== KINDS.join();
+            const move = (kind, to) => {
+                const next = order.filter(k => k !== kind);
+                next.splice(to, 0, kind);
+                settings.set_strv(key, next);
+            };
+            order.forEach((kind, i) => list.append(orderRow(kind, i, order.length, kinds[kind], move)));
+        };
+        settings.connect(`changed::${key}`, fill);
+        fill();
+        return group;
+    }
+
     _mirrorGroup(window, {title, description, key, switchTitle, mirror}) {
         const group = new Adw.PreferencesGroup({title, description});
         const row = new Adw.SwitchRow({

@@ -39,11 +39,21 @@ Then, for any app:
 
 It works with the dock (including Dash to Dock), Alt+Tab and the overview, and has no measurable CPU impact: a window's process is looked up once, launcher files are read only for windows GNOME couldn't place and only again after they change, and a changing window title costs a single table lookup.
 
+### Where icons and names come from
+
+The **General** tab of the preferences sets, for windows GNOME can't place by itself, which icon and which name come first. Drag the rows (or use their arrows) to put them in order; the first one a game has is used:
+
+- **.desktop**: the `Icon=` and `Name=` of the game's `.desktop` file, or, without one, what its launcher knows (Lutris' icon, Heroic's title…)
+- **.exe**: the icon and product name inside a Windows game's `.exe` (else its file name)
+- **Default**: what GNOME shows by itself, the launcher's icon and name or a generic one. Nothing below it is ever used.
+
+The usual order is .desktop, .exe, Default. A game whose shortcut was found stays on it in the dock either way, showing the icon and name the order gives while it runs. With Default first for both, Icon Fix leaves such windows as GNOME has them.
+
 ### Steam from Flathub
 
 Flatpak Steam (`com.valvesoftware.Steam`) writes its game shortcuts inside its sandbox, where GNOME never looks, and their `Exec=steam …` doesn't exist on the host. So installed games are missing from search and the app grid.
 
-Turn on **Show Flatpak Steam games** in the extension's preferences (off by default). Icon Fix then mirrors each game into `~/.local/share/applications/steam-flatpak-<id>.desktop`:
+Turn on **Show Flatpak Steam games** in the **Flatpak** tab of the extension's preferences (off by default). Icon Fix then mirrors each game into `~/.local/share/applications/steam-flatpak-<id>.desktop`:
 
 - launches with `flatpak run com.valvesoftware.Steam steam://rungameid/<id>`;
 - uses the game's icon from the sandbox;
@@ -57,7 +67,7 @@ The mirror stays in sync as you install or remove games. Icon Fix only writes an
 
 Flatpak Bottles (`com.usebottles.bottles`) can't add its programs to the app grid: its **Add Desktop Entry** reports success but no file appears, because the sandbox may not write to `~/.local/share/applications`.
 
-Turn on **Show Flatpak Bottles programs** in the extension's preferences (off by default). Icon Fix then writes a shortcut for every program of every bottle, `~/.local/share/applications/bottles-flatpak-<bottle>-<program>.desktop`:
+Turn on **Show Flatpak Bottles programs** in the **Flatpak** tab of the extension's preferences (off by default). Icon Fix then writes a shortcut for every program of every bottle, `~/.local/share/applications/bottles-flatpak-<bottle>-<program>.desktop`:
 
 - launches with `flatpak run --command=bottles-cli com.usebottles.bottles run -p <program> -b <bottle>`, like Bottles' own shortcuts;
 - uses the icon Bottles extracted from the program, or else the one inside its `.exe`;
@@ -91,7 +101,7 @@ The same goes for shortcuts with an empty `Icon=` or one that points nowhere: Ic
 
 The **Debug** tab of the preferences shows, for every open window, how GNOME picked its app, name and icon step by step, what Icon Fix changed, and who in the Shell asks for icons. It's recorded only while the preferences are open.
 
-Icon Fix writes errors to the system journal. Turn on **Debug logging** in its preferences to also see how each window was matched, which icons were replaced and what the shortcut options wrote:
+Icon Fix writes errors to the system journal. Turn on **Debug logging** in the Debug tab of its preferences to also see how each window was matched, which icons were replaced and what the shortcut options wrote:
 
 ```bash
 journalctl --user -f | grep 'Icon Fix'
@@ -131,10 +141,13 @@ src/
 │   ├── process.js      # /proc reading, argv parsing, Wine path translation
 │   ├── formats.js      # YAML (Bottles, Lutris) and VDF (Steam) readers
 │   ├── log.js          # journal messages, details behind the debug setting
+│   ├── look.js         # the icon and name orders of the preferences
+│   ├── lnk.js          # Windows shortcuts (.lnk): the program they start
 │   ├── peicon.js       # icon and product name from a Windows .exe
 │   └── util.js         # paths, file caches
 ├── sources/            # one file per launcher, see registry.js for the interface
 │   ├── registry.js
+│   ├── launcher.js     # what the launchers share: their keys, prefixes, folders
 │   ├── steam.js
 │   ├── heroic.js
 │   ├── lutris.js

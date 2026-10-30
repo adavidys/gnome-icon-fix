@@ -15,6 +15,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Tracer, clearTrace} from './debug/trace.js';
 import {AppIndex, parseExec, tryCall} from './lib/appindex.js';
 import * as log from './lib/log.js';
+import {pick} from './lib/look.js';
 import {matchTitle, matchWindow} from './lib/matcher.js';
 import {forgetRead} from './lib/peicon.js';
 import {readProcess} from './lib/process.js';
@@ -48,6 +49,14 @@ export default class IconFixExtension extends Extension {
         this._tracker = Shell.WindowTracker.get_default();
         this._iconTheme = new St.IconTheme();
         this._cache = new WeakMap();
+        // Where icons and names come from, first choice first (lib/look.js),
+        // and what an entry shows while a window moved to it (split.js)
+        // shows something else than the entry's own.
+        this._readOrders();
+        this._settings.connectObject(
+            'changed::icon-order', () => this._readOrders(true),
+            'changed::name-order', () => this._readOrders(true), this);
+        this._looks = new WeakMap();
         // pid -> what /proc says about it. Unlike _cache it survives index
         // rebuilds (installed-changed fires in bursts while Steam installs),
         // and is dropped when the process's last window goes away.
@@ -79,7 +88,7 @@ export default class IconFixExtension extends Extension {
         // found (not one only the title matched: titles change).
         this._splitter = new WindowSplitter((win, splitter, host) => host.is_window_backed()
             ? this._backedEntry(host)
-            : this._launcherGameApp(win, splitter));
+            : this._launcherGameApp(win, splitter, host));
         this._refreshRunning();
 
         // The trace behind the Debug tab, while the preferences are open;
@@ -157,6 +166,7 @@ export default class IconFixExtension extends Extension {
         this._tracker = null;
         this._iconTheme = null;
         this._cache = null;
+        this._looks = null;
         this._procs = null;
         this._sources = null;
         this._envKeys = null;
@@ -180,6 +190,17 @@ export default class IconFixExtension extends Extension {
         }
     }
 
+    // again: the order changed, every window is looked at again.
+    _readOrders(again = false) {
+        this._iconOrder = this._settings.get_strv('icon-order');
+        this._nameOrder = this._settings.get_strv('name-order');
+        // Without .desktop first, the .exe's icon or name may be shown
+        // though an entry was found: look for it then too.
+        this._allFallbacks = this._iconOrder[0] !== 'desktop' || this._nameOrder[0] !== 'desktop';
+        if (again)
+            this._queueReindex();
+    }
+
     _queueReindex() {
         if (this._reindexId)
             GLib.source_remove(this._reindexId);
@@ -188,6 +209,7 @@ export default class IconFixExtension extends Extension {
             this._iconTheme = new St.IconTheme();
             this._buildIndex();
             this._cache = new WeakMap();
+            this._looks = new WeakMap();
             this._splitter.recheckAll();
             this._refreshRunning();
             return GLib.SOURCE_REMOVE;
@@ -233,18 +255,24 @@ export default class IconFixExtension extends Extension {
             return original.call(this, size);
         });
 
-        this._injections.overrideMethod(proto, 'get_icon', original => function () {
-            const found = ext._resolve(this);
-            if (found?.app)
-                return found.app.get_icon();
-            return found?.gicon ?? original.call(this);
+        this._injections.overrideMethod(proto, 'get_icon', original => {
+            // GNOME's own, for "default" (lib/look.js)
+            ext._gnomeIcon = app => original.call(app);
+            return function () {
+                const found = ext._resolve(this);
+                if (found?.app)
+                    return found.app.get_icon();
+                return found?.gicon ?? original.call(this);
+            };
         });
-
-        this._injections.overrideMethod(proto, 'get_name', original => function () {
-            const found = ext._resolve(this);
-            if (found?.app)
-                return original.call(found.app);
-            return found?.name ?? original.call(this);
+        this._injections.overrideMethod(proto, 'get_name', original => {
+            ext._gnomeName = app => original.call(app);
+            return function () {
+                const found = ext._resolve(this);
+                if (found?.app)
+                    return original.call(found.app);
+                return found?.name ?? original.call(this);
+            };
         });
     }
 
@@ -260,7 +288,7 @@ export default class IconFixExtension extends Extension {
         if (!this._index)
             return null;
         if (!app.is_window_backed())
-            return this._entryIcon(app);
+            return this._movedLook(app) ?? this._entryIcon(app);
 
         const cached = this._cache.get(app);
         // Its own window, also once moved to the game's entry (split.js).
@@ -285,18 +313,27 @@ export default class IconFixExtension extends Extension {
                 gtkId: win.get_gtk_application_id(),
                 sandboxId: win.get_sandboxed_app_id(),
                 proc: this._procInfo(pid),
-            });
-            found = {
-                key,
-                primary: this._realize(primary),
-                fallback: this._fallback(fallbacks),
-                launcher,
-            };
-            log.debug(`window "${title}" (${win.get_wm_class()}, pid ${pid}): ${describe(found)}`);
+            }, this._allFallbacks);
+            found = {key, primary: this._realize(primary), fallbacks, launcher};
+            log.debug(`window "${title}" (${win.get_wm_class()}, pid ${pid}): ` +
+                `${found.primary ? `entry ${found.primary.tag}` : `fallbacks ${JSON.stringify(fallbacks)}`}`);
         }
 
-        const result = found.primary ?? this._realize(matchTitle(this._index, title, found.launcher)) ?? found.fallback;
-        this._cache.set(app, {key, primary: found.primary, fallback: found.fallback, launcher: found.launcher, title, result});
+        // Its entry (by the sources, else by the title) when its icon and
+        // name are both to come from .desktop; else what the order says.
+        const entry = found.primary ?? this._realize(matchTitle(this._index, title, found.launcher));
+        const look = this._choose(entry?.app ?? null, found.fallbacks, app);
+        let result = look;
+        if (look.iconKind === 'default' && look.nameKind === 'default')
+            result = null;
+        else if (entry && look.iconKind === 'desktop' && look.nameKind === 'desktop')
+            result = entry;
+        // The window goes to its entry (split.js), which shows the same;
+        // with GNOME's own icon and name both first, it stays as GNOME has it.
+        const moveTo = result && found.primary ? found.primary.app : null;
+        if (moveTo)
+            this._setLook(moveTo, result === entry ? null : look.whole);
+        this._cache.set(app, {key, primary: found.primary, fallbacks: found.fallbacks, launcher: found.launcher, title, result, moveTo});
         if (cached && cached.result?.tag !== result?.tag)
             this._queueNotify(app);
         return result;
@@ -306,6 +343,8 @@ export default class IconFixExtension extends Extension {
     // blank one: an icon its launcher kept inside its Flatpak sandbox
     // (Lutris' "Create application menu shortcut", Steam's shortcuts), else
     // the icon of the game it launches (its .exe's) when there's none at all.
+    // In the icon order: the .desktop's own (where its launcher put it), the
+    // .exe's, or none (GNOME's blank one).
     _entryIcon(app) {
         const cached = this._cache.get(app);
         if (cached)
@@ -314,9 +353,12 @@ export default class IconFixExtension extends Extension {
         const info = app.get_app_info();
         const icon = info?.get_icon();
         if (info && !this._iconShown(icon)) {
-            if (icon instanceof Gio.ThemedIcon)
-                path = icon.get_names().map(name => findSandboxedIcon(name)).find(Boolean) ?? null;
-            path ??= this._programIcon(info);
+            const own = icon instanceof Gio.ThemedIcon
+                ? icon.get_names().map(name => findSandboxedIcon(name)).find(Boolean) ?? null : null;
+            path = pick(this._iconOrder, {
+                desktop: own ?? this._programIcon(info, s => s.name !== 'exe'),
+                exe: this._programIcon(info, s => s.name === 'exe'),
+            }).value;
         }
         const result = path ? {gicon: new Gio.FileIcon({file: Gio.File.new_for_path(path)})} : null;
         if (result)
@@ -333,15 +375,15 @@ export default class IconFixExtension extends Extension {
         return !!icon;
     }
 
-    // Asks the sources for the icon of what an entry launches.
-    _programIcon(info) {
+    // Asks the sources (those which) for the icon of what an entry launches.
+    _programIcon(info, which) {
         // Gio.DesktopAppInfo moved to GioUnix in newer GLib; duck-type it.
         const exec = typeof info.get_string === 'function' ? info.get_string('Exec') : null;
         if (!exec)
             return null;
         const entry = {id: info.get_id() ?? '', exec, icon: info.get_string('Icon')};
         const argv = parseExec(exec);
-        for (const source of this._sources) {
+        for (const source of this._sources.filter(which)) {
             const path = tryCall(source, 'entryIcon', entry, argv);
             if (path && GLib.file_test(path, GLib.FileTest.EXISTS))
                 return path;
@@ -372,16 +414,45 @@ export default class IconFixExtension extends Extension {
         return {gicon, name: found.name ?? null, tag: `${tag}\n${found.name}`};
     }
 
-    // What the sources would show without an entry, combined: the best
-    // source's name and the best source's icon need not be the same one
-    // (a launcher knows the title, the .exe has the icon).
-    _fallback(fallbacks) {
-        const shown = fallbacks.map(f => this._realize(f)).filter(Boolean);
-        if (!shown.length)
-            return null;
-        const gicon = shown.find(f => f.gicon)?.gicon ?? null;
-        const name = shown.find(f => f.name)?.name ?? null;
-        return {gicon, name, tag: `${gicon?.to_string()}\n${name}`};
+    // What a window is shown with, in the user's order (lib/look.js):
+    // .desktop is its entry's icon and name, or without one what its
+    // launcher knows (the sources' fallbacks); .exe what its program
+    // holds; default GNOME's own, for host (the app GNOME gave it).
+    // {gicon, name, tag, iconKind, nameKind}: null for GNOME's own; whole:
+    // the same with GNOME's own filled in.
+    _choose(entryApp, fallbacks, host) {
+        const shown = fallbacks.map(f => ({exe: f.source === 'exe', look: this._realize(f)})).filter(f => f.look);
+        const first = (exe, key) => shown.filter(f => f.exe === exe).map(f => f.look[key]).find(Boolean) ?? null;
+        const icon = pick(this._iconOrder, {
+            desktop: entryApp ? this._entryIcon(entryApp)?.gicon ?? this._gnomeIcon(entryApp) : first(false, 'gicon'),
+            exe: first(true, 'gicon'),
+        });
+        const name = pick(this._nameOrder, {
+            desktop: entryApp ? this._gnomeName(entryApp) : first(false, 'name'),
+            exe: first(true, 'name'),
+        });
+        const tag = `${icon.kind}:${icon.value?.to_string()}\n${name.kind}:${name.value}`;
+        return {
+            gicon: icon.value, name: name.value, tag, iconKind: icon.kind, nameKind: name.kind,
+            whole: {gicon: icon.value ?? this._gnomeIcon(host), name: name.value ?? this._gnomeName(host), tag},
+        };
+    }
+
+    // What an entry a window was moved to shows while it has it, when
+    // that isn't the entry's own (_choose()); null otherwise.
+    _movedLook(app) {
+        const look = this._looks.get(app);
+        return look && this._splitter?.hosts(app) ? look : null;
+    }
+
+    _setLook(app, look) {
+        if (this._looks.get(app)?.tag === look?.tag)
+            return;
+        if (look)
+            this._looks.set(app, look);
+        else
+            this._looks.delete(app);
+        this._queueNotify(app);
     }
 
     // For the Debug tab: every name and icon Icon Fix considered for a
@@ -406,47 +477,50 @@ export default class IconFixExtension extends Extension {
             ...inLauncher ? {launcherSandbox: sandbox} : {sandboxId: sandbox},
             proc: this._procInfo(win.get_pid()),
         }, true);
-        const entry = (id, source) => {
-            const found = this._appSystem.lookup_app(id);
-            return {source, kind: 'entry', id, name: found?.get_name() ?? null, icon: toString(found?.get_icon()),
-                usesName: true, usesIcon: true, missing: !found};
-        };
-        // What is shown first: an entry (found by a source or a guess, or
-        // by the title), then, as _fallback(), the first name and the
-        // first icon the sources can show. The rest is listed as what
-        // could have been used. A game in a launcher's sandbox isn't matched
-        // by its title (_launcherGameApp()): that could be another
-        // launcher's shortcut for it.
+        // What is shown: an entry (found by a source or a guess, or by the
+        // title) and the sources' fallbacks, taken in the user's order as
+        // _choose() takes them; the rest is listed as what could have been
+        // used. A game in a launcher's sandbox isn't matched by its title
+        // (_launcherGameApp()): that could be another launcher's shortcut.
         const title = primary || inLauncher ? null : matchTitle(this._index, win.get_title(), launcher);
-        const head = primary ? [entry(primary.id, primary.by)] : title ? [entry(title.id, 'window title')] : [];
-        let nameTaken = head.length > 0, iconTaken = head.length > 0;
+        const headId = primary?.id ?? title?.id ?? null;
+        const entryApp = headId ? this._appSystem.lookup_app(headId) : null;
+        const look = this._choose(entryApp, fallbacks, app);
+        // Nothing is used with GNOME's own icon and name both first, nor for
+        // a launcher's game without an entry unless it has an icon and a
+        // name (it gets an entry of its own only then).
+        const gnomes = look.iconKind === 'default' && look.nameKind === 'default';
+        const shown = !gnomes && !(inLauncher && !headId && (look.iconKind === 'default' || look.nameKind === 'default'));
+        const head = headId ? [{source: primary?.by ?? 'window title', kind: 'entry', id: headId,
+            name: entryApp ? this._gnomeName(entryApp) : null,
+            icon: entryApp ? toString(this._entryIcon(entryApp)?.gicon ?? this._gnomeIcon(entryApp)) : null,
+            usesName: shown && look.nameKind === 'desktop', usesIcon: shown && look.iconKind === 'desktop',
+            missing: !entryApp}] : [];
+        // Only the first icon and name of each kind can be the one shown.
+        const taken = {desktop: {icon: !!headId, name: !!headId}, exe: {icon: false, name: false}};
         const listed = [...head, ...fallbacks.map(f => {
-            const shown = this._realize(f);
-            const icon = toString(shown?.gicon);
+            const kind = f.source === 'exe' ? 'exe' : 'desktop';
+            const icon = toString(this._realize(f)?.gicon);
             const out = {source: f.source, kind: 'fallback', name: f.name ?? null, icon: icon ?? f.icon ?? f.iconName ?? null,
-                usesName: !!f.name && !nameTaken, usesIcon: !!icon && !iconTaken, missing: !icon && !!(f.icon || f.iconName)};
-            nameTaken ||= out.usesName;
-            iconTaken ||= out.usesIcon;
+                usesName: shown && !!f.name && !taken[kind].name && look.nameKind === kind,
+                usesIcon: shown && !!icon && !taken[kind].icon && look.iconKind === kind,
+                missing: !icon && !!(f.icon || f.iconName)};
+            taken[kind].name ||= !!f.name;
+            taken[kind].icon ||= !!icon;
             return out;
         })];
-        // The game gets an entry of its own only with both a name and an
-        // icon; else its window stays with the launcher.
-        if (inLauncher && !head.length && !(nameTaken && iconTaken)) {
-            for (const c of listed)
-                c.usesName = c.usesIcon = false;
-        }
         return listed;
     }
 
     _backedEntry(app) {
         this._resolve(app);
-        return this._cache.get(app)?.primary?.app ?? null;
+        return this._cache.get(app)?.moveTo ?? null;
     }
 
     // For a window inside a launcher's Flatpak sandbox: the app of the game
     // running in it. Matched as if it weren't sandboxed, so the launcher's
     // own windows (no game id in their environment) stay with the launcher.
-    _launcherGameApp(win, splitter) {
+    _launcherGameApp(win, splitter, host) {
         if (!this._index)
             return null;
         const {primary, fallbacks} = matchWindow(this._index, this._sources, {
@@ -455,17 +529,24 @@ export default class IconFixExtension extends Extension {
             gtkId: win.get_gtk_application_id(),
             launcherSandbox: win.get_sandboxed_app_id(),
             proc: this._procInfo(win.get_pid()),
-        });
+        }, this._allFallbacks);
         log.debug(`launcher window "${win.get_title()}" (${win.get_wm_class()}, ${win.get_sandboxed_app_id()}): ` +
             `${primary ? `entry ${primary.id}` : `no entry, fallbacks ${JSON.stringify(fallbacks)}`}`);
-        if (primary)
-            return this._appSystem.lookup_app(primary.id);
+        const entryApp = primary ? this._appSystem.lookup_app(primary.id) : null;
+        const look = this._choose(entryApp, fallbacks, host);
+        // GNOME's own icon and name both first: as GNOME has it.
+        if (look.iconKind === 'default' && look.nameKind === 'default')
+            return null;
+        if (entryApp) {
+            this._setLook(entryApp, look.iconKind === 'desktop' && look.nameKind === 'desktop' ? null : look.whole);
+            return entryApp;
+        }
 
         // No .desktop for it (Flatpak Bottles can't create one, Heroic
         // doesn't for sideloaded games): still give the game its own entry
-        // if the sources know its name and icon.
-        const shown = this._fallback(fallbacks);
-        return shown?.gicon && shown.name ? splitter.virtualApp(shown.name, shown.gicon, shown.tag) : null;
+        // if the order gives it an icon and a name other than the launcher's.
+        return look.iconKind !== 'default' && look.nameKind !== 'default'
+            ? splitter.virtualApp(look.name, look.gicon, look.tag) : null;
     }
 
     _procInfo(pid) {
@@ -536,10 +617,3 @@ export default class IconFixExtension extends Extension {
 }
 
 // For the debug log: what a window was matched to.
-function describe({primary, fallback}) {
-    if (primary)
-        return `entry ${primary.tag}`;
-    if (fallback)
-        return `no entry, showing "${fallback.name}" with ${fallback.gicon?.to_string() ?? 'no icon'}`;
-    return 'nothing found, left as is';
-}
