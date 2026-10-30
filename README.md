@@ -44,10 +44,10 @@ It works with the dock (including Dash to Dock), Alt+Tab and the overview, and h
 The **General** tab of the preferences sets, for windows GNOME can't place by itself, which icon and which name come first. Drag the rows to put them in order; the first one a game has is used:
 
 - **.desktop**: the `Icon=` and `Name=` of the game's `.desktop` file, or, without one, what its launcher knows (Lutris' icon, Heroic's title…)
-- **.exe**: the icon and product name inside a Windows game's `.exe` (else its file name)
+- **Application**: the icon and product name inside the game's program, a Windows `.exe` (else its file name)
 - **Default**: what GNOME shows by itself, the launcher's icon and name or a generic one. Nothing below it is ever used.
 
-The usual order is .desktop, .exe, Default. A game whose shortcut was found stays on it in the dock either way, showing the icon and name the order gives while it runs. With Default first for both, Icon Fix leaves such windows as GNOME has them.
+The usual order is .desktop, Application, Default. A game whose shortcut was found stays on it in the dock either way, showing the icon and name the order gives while it runs. With Default first for both, Icon Fix leaves such windows as GNOME has them.
 
 ### Steam from Flathub
 

@@ -47,12 +47,12 @@ const QR_SIZE = 220;
 // The rows of the icon and name orders (lib/look.js)
 const ICON_KINDS = {
     desktop: {title: '.desktop icon', subtitle: 'Icon= of the game\'s .desktop file, or the icon its launcher keeps for it'},
-    exe: {title: '.exe icon', subtitle: 'The icon inside a Windows game\'s .exe'},
+    exe: {title: 'Application icon', subtitle: 'The icon inside the game\'s program (a Windows .exe)'},
     default: {title: 'Default icon', subtitle: 'What GNOME shows by itself: the launcher\'s icon, or a generic one'},
 };
 const NAME_KINDS = {
     desktop: {title: '.desktop name', subtitle: 'Name= of the game\'s .desktop file, or the title its launcher has for it'},
-    exe: {title: '.exe name', subtitle: 'The product name inside a Windows game\'s .exe, else its file name'},
+    exe: {title: 'Application name', subtitle: 'The product name inside the game\'s program (a Windows .exe), else its file name'},
     default: {title: 'Default name', subtitle: 'What GNOME shows by itself: the launcher\'s name, or the window\'s'},
 };
 
