@@ -19,7 +19,7 @@ import {pick} from './lib/look.js';
 import {matchTitle, matchWindow} from './lib/matcher.js';
 import {forgetRead} from './lib/peicon.js';
 import {readProcess} from './lib/process.js';
-import {LAUNCHER_SANDBOXES, findSandboxedIcon} from './lib/util.js';
+import {LAUNCHER_SANDBOXES, findPixmap, findSandboxedIcon} from './lib/util.js';
 import {FlatpakBottlesMirror} from './mirror/bottles-flatpak.js';
 import {FlatpakSteamMirror} from './mirror/steam-flatpak.js';
 import {createSources, envKeys} from './sources/registry.js';
@@ -356,7 +356,7 @@ export default class IconFixExtension extends Extension {
         const icon = info?.get_icon();
         if (info && !this._iconShown(icon)) {
             const own = icon instanceof Gio.ThemedIcon
-                ? icon.get_names().map(name => findSandboxedIcon(name)).find(Boolean) ?? null : null;
+                ? icon.get_names().map(name => findSandboxedIcon(name) ?? findPixmap(name)).find(Boolean) ?? null : null;
             path = pick(this._iconOrder, {
                 desktop: own ?? this._programIcon(info, s => s.name !== 'exe'),
                 exe: this._programIcon(info, s => s.name === 'exe'),
@@ -405,10 +405,15 @@ export default class IconFixExtension extends Extension {
         let gicon = null;
         let tag = null;
         // iconName: a name, or names to try in turn (sources/theme.js)
-        const iconName = [found.iconName ?? []].flat().find(name => this._iconTheme.has_icon(name));
+        const names = [found.iconName ?? []].flat();
+        const iconName = names.find(name => this._iconTheme.has_icon(name));
+        const pixmap = iconName ? null : names.map(findPixmap).find(Boolean);
         if (iconName) {
             gicon = new Gio.ThemedIcon({name: iconName});
             tag = iconName;
+        } else if (pixmap) {
+            gicon = new Gio.FileIcon({file: Gio.File.new_for_path(pixmap)});
+            tag = pixmap;
         } else if (found.icon && GLib.file_test(found.icon, GLib.FileTest.EXISTS)) {
             gicon = new Gio.FileIcon({file: Gio.File.new_for_path(found.icon)});
             tag = found.icon;

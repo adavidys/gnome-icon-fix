@@ -209,6 +209,24 @@ export function findHicolorIcon(share, name) {
     return null;
 }
 
+// An icon given by name that lies in a pixmaps folder (/usr/share/pixmaps,
+// and the same under every data dir) rather than in an icon theme, as the
+// desktop menu specification allows and older programs and packages do
+// (osu-lazer-bin's Icon=osu-lazer): its path, or null.
+export function findPixmap(name) {
+    if (!name || name.includes('/'))
+        return null;
+    const dirs = [GLib.get_user_data_dir(), ...GLib.get_system_data_dirs()];
+    for (const dir of dirs) {
+        for (const ext of ['png', 'svg', 'xpm']) {
+            const path = GLib.build_filenamev([dir, 'pixmaps', `${name}.${ext}`]);
+            if (exists(path))
+                return path;
+        }
+    }
+    return null;
+}
+
 // Game launchers from Flathub. Their games run inside their sandbox, and
 // the icons they make for game shortcuts stay in it.
 export const LAUNCHER_SANDBOXES = new Set([

@@ -100,4 +100,11 @@ test('util: hicolor icons, also inside launcher sandboxes', () => {
     eq(short(util.findSandboxedIcon('lutris_some-game')),
         '~/.var/app/net.lutris.Lutris/data/icons/hicolor/128x128/apps/lutris_some-game.png');
     eq(util.findSandboxedIcon('nope'), null);
+    // Pixmaps folders, under the user's data dir first
+    GLib.mkdir_with_parents(`${HOME}/.local/share/pixmaps`, 0o755);
+    GLib.file_set_contents(`${HOME}/.local/share/pixmaps/old-app.xpm`, 'x');
+    eq(short(util.findPixmap('old-app')), '~/.local/share/pixmaps/old-app.xpm');
+    eq(util.findPixmap('nope-not-there'), null);
+    eq(util.findPixmap('a/b'), null, 'a path, not a name');
+    eq(util.findPixmap(null), null);
 });

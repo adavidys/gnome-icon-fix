@@ -37,7 +37,9 @@ Then, for any app:
 - **Install folder**: a game started from inside the folder of a shortcut's program or `Path=` (GOG installers, Minigalaxy, itch.io, scripts).
 - **Window title**, as a last resort.
 
-Entries that only stand for something else are left out: a URI handler a program registers for itself (osu! registers a hidden "Game 1216669957799018608" for Discord) and anything run from an AppImage's temporary mount. An AppImage a package starts through a wrapper script (`/usr/bin/osu-lazer` runs `/opt/osu-lazer/osu.AppImage`) is found through the script. Without any entry, an icon named after the window's class or program in the icon theme (or `/usr/share/pixmaps`) is used, as docks on other desktops do.
+Icons given by name are also looked for in the `pixmaps` folders (`/usr/share/pixmaps`, `~/.local/share/pixmaps`), where many packages put them (osu-lazer-bin's `Icon=osu-lazer`).
+
+Entries that only stand for something else are left out: a URI handler a program registers for itself (osu! registers a hidden "Game 1216669957799018608" for Discord) and anything run from an AppImage's temporary mount. An AppImage a package starts through a wrapper script (`/usr/bin/osu-lazer` runs `/opt/osu-lazer/osu.AppImage`) is found through the script. Without any entry, an icon named after the window's class or program in the icon theme is used, as docks on other desktops do.
 
 It works with the dock (including Dash to Dock), Alt+Tab and the overview, and has no measurable CPU impact: a window's process is looked up once, launcher files are read only for windows GNOME couldn't place and only again after they change, and a changing window title costs a single table lookup.
 
