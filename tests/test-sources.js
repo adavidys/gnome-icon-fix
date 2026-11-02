@@ -25,7 +25,7 @@ const wine = (env = {}, extra = {}) => ctx({proc: {pid: 0, argv: [WGAME], exe: '
 const index = entries => new AppIndex(entries, sources);
 
 test('registry: every source, and the variables they want', () => {
-    eq(sources.map(s => s.name), ['wine', 'heroic', 'steam', 'bottles', 'lutris', 'packaging', 'exe']);
+    eq(sources.map(s => s.name), ['wine', 'heroic', 'steam', 'bottles', 'lutris', 'packaging', 'theme', 'exe']);
     const keys = envKeys(sources);
     for (const key of ['WINEPREFIX', 'HEROIC_APP_NAME', 'SteamAppId', 'BOTTLE', 'LUTRIS_GAME_UUID', 'APPIMAGE'])
         ok(keys.has(key), key);
@@ -377,6 +377,23 @@ test('packaging: Snap and AppImage', () => {
     eq(p.identify(proc({APPIMAGE: appimage}), idx), {id: 'foo.desktop'});
     eq(p.identify(proc({APPIMAGE: `${HOME}/Applications/bar-launcher.AppImage`}), idx), {id: 'bar.desktop'}, 'by name');
     eq(p.identify(proc({APPIMAGE: 'relative.AppImage'}), idx), null);
+    // An AppImage a package runs through a script of its own.
+    const wrapped = index([
+        {id: 'binary.desktop', exec: `${HOME}/bin/binary`},
+        {id: 'plain.desktop', exec: `${HOME}/bin/plain-script`},
+        {id: 'huge.desktop', exec: `${HOME}/bin/huge`},
+        {id: 'other.desktop', exec: `${HOME}/bin/other-script`},
+        {id: 'gone.desktop', exec: `${HOME}/bin/gone`},
+        {id: 'osu-lazer.desktop', exec: `${HOME}/bin/osu-lazer %u`},
+    ]);
+    eq(p.identify(proc({APPIMAGE: `${HOME}/opt/osu/osu.AppImage`}), wrapped), {id: 'osu-lazer.desktop'}, 'by its wrapper script');
+    eq(p.identify(proc({APPIMAGE: `${HOME}/opt/osu/unknown.AppImage`}), wrapped), null);
+    eq(p.identify(proc({APPIMAGE: `${HOME}/opt/osu/vanished.AppImage`}), wrapped), {id: 'other.desktop'}, 'by the path alone');
+    // An icon named after the window or its program.
+    const t = S('theme');
+    eq(t.fallback(ctx({wmClass: 'osu!', wmInstance: 'Osu!', proc: {pid: 0, argv: ['/x/osu'], exe: '/x/osu', cwd: '/', env: {}}})),
+        {iconName: ['osu!', 'Osu!', 'osu']});
+    eq(t.fallback(ctx({})), null);
     eq(p.identify(proc({}), idx), null);
     eq(new AppIndex([{id: 'a_b.desktop', name: 'X'}], sources).map('snap').size, 0, 'no Exec');
 });

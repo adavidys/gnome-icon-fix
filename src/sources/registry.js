@@ -48,6 +48,7 @@ import {HeroicSource} from './heroic.js';
 import {LutrisSource} from './lutris.js';
 import {PackagingSource} from './packaging.js';
 import {SteamSource} from './steam.js';
+import {ThemeSource} from './theme.js';
 import {WineSource} from './wine.js';
 
 export function createSources() {
@@ -61,7 +62,9 @@ export function createSources() {
         new BottlesSource(),
         new LutrisSource(),
         new PackagingSource(),
-        // Fallback only: whatever the launchers know comes first.
+        // Fallbacks only: whatever the launchers know comes first, then an
+        // icon named after the window, then the .exe's.
+        new ThemeSource(),
         new ExeSource(),
     ];
 }

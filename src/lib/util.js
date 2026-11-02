@@ -88,6 +88,17 @@ export function readJson(path) {
 // Cheap change detector for a file or directory: mtime (µs) and size; null
 // if they can't be read. (In a folder we may list but not enter, Gio
 // answers without them rather than failing.)
+// What a file is, whatever path (and links) leads to it: its device and
+// inode, or null if it can't be read.
+export function fileId(path) {
+    try {
+        return Gio.File.new_for_path(path).query_info('id::file', Gio.FileQueryInfoFlags.NONE, null)
+            .get_attribute_string('id::file');
+    } catch {
+        return null;
+    }
+}
+
 export function fileStamp(path) {
     let info;
     try {

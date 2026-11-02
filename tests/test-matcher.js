@@ -28,8 +28,10 @@ const wine = (env, extra = {}, argv = [WGAME], cwd = GAME_DIR) => ({...extra, pr
 const umu = (prefix, extra = {}) => ({SteamAppId: 'default', GAMEID: 'umu-default', WINEPREFIX: `${prefix}/pfx/`, STEAM_COMPAT_DATA_PATH: prefix, ...extra});
 
 // What a match comes to: the entry, or what each source would show.
+// (Without the icon theme's names, tried in test-sources.js.)
 function outcome({primary, fallbacks}) {
-    return primary ? primary.id : fallbacks.map(f => [f.name ?? null, short(f.icon) ?? null, f.iconName ?? null]);
+    return primary ? primary.id : fallbacks.filter(f => f.source !== 'theme')
+        .map(f => [f.name ?? null, short(f.icon) ?? null, f.iconName ?? null]);
 }
 
 export const CASES = [
@@ -157,6 +159,6 @@ test('matcher: what found an entry, and every fallback with its source', () => {
     ['steam', 'sandbox id', 'GTK app id', 'window class', 'window instance', 'program path', 'program name', 'install folder', null]);
     const all = matchWindow(index, sources, CASES.find(([n]) => n === 'heroic by env')[1], true);
     eq(all.primary.id, 'heroic_some.desktop');
-    eq(all.fallbacks.map(f => f.source), ['heroic', 'exe'], 'fallbacks even with an entry');
+    eq(all.fallbacks.map(f => f.source), ['heroic', 'theme', 'exe'], 'fallbacks even with an entry');
     eq(matchWindow(index, sources, CASES.find(([n]) => n === 'heroic by env')[1]).fallbacks, [], 'not by default');
 });

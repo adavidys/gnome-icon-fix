@@ -229,6 +229,8 @@ export default class IconFixExtension extends Extension {
                 exec: info.get_string('Exec'),
                 icon: info.get_string('Icon'),
                 path: info.get_string('Path'),
+                noDisplay: info.get_nodisplay(),
+                mimeType: info.get_string('MimeType'),
             });
         }
         this._index = log.timed(`indexed ${entries.length} apps`, () => new AppIndex(entries, this._sources));
@@ -402,9 +404,11 @@ export default class IconFixExtension extends Extension {
         }
         let gicon = null;
         let tag = null;
-        if (found.iconName && this._iconTheme.has_icon(found.iconName)) {
-            gicon = new Gio.ThemedIcon({name: found.iconName});
-            tag = found.iconName;
+        // iconName: a name, or names to try in turn (sources/theme.js)
+        const iconName = [found.iconName ?? []].flat().find(name => this._iconTheme.has_icon(name));
+        if (iconName) {
+            gicon = new Gio.ThemedIcon({name: iconName});
+            tag = iconName;
         } else if (found.icon && GLib.file_test(found.icon, GLib.FileTest.EXISTS)) {
             gicon = new Gio.FileIcon({file: Gio.File.new_for_path(found.icon)});
             tag = found.icon;
@@ -501,7 +505,8 @@ export default class IconFixExtension extends Extension {
         const listed = [...head, ...fallbacks.map(f => {
             const kind = f.source === 'exe' ? 'exe' : 'desktop';
             const icon = toString(this._realize(f)?.gicon);
-            const out = {source: f.source, kind: 'fallback', name: f.name ?? null, icon: icon ?? f.icon ?? f.iconName ?? null,
+            const out = {source: f.source, kind: 'fallback', name: f.name ?? null,
+                icon: icon ?? f.icon ?? ([f.iconName ?? []].flat().join(' ') || null),
                 usesName: shown && !!f.name && !taken[kind].name && look.nameKind === kind,
                 usesIcon: shown && !!icon && !taken[kind].icon && look.iconKind === kind,
                 missing: !icon && !!(f.icon || f.iconName)};

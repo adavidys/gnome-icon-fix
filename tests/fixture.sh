@@ -272,4 +272,14 @@ lnk "$G/Via.lnk" "{\"target\": \"Z:$(echo "$F/Elsewhere/other.exe" | sed 's|/|\\
 # --- AppImage
 mkdir -p "$F/Applications"
 printf 'not really an appimage' > "$F/Applications/Foo-1.0.AppImage"
+# A package's wrapper script for an AppImage (osu-lazer), and other programs
+mkdir -p "$F/opt/osu" "$F/bin"
+printf 'not really an appimage' > "$F/opt/osu/osu.AppImage"
+printf '#!/bin/sh\nenv A=1 %s/opt-link/osu/osu.AppImage "$@"\n' "$F" > "$F/bin/osu-lazer"
+ln -s opt "$F/opt-link"
+printf '#!/bin/sh\nexec %s/opt/osu/vanished.AppImage\n' "$F" > "$F/bin/other-script"
+printf '#!/bin/sh\nexec /usr/bin/true\n' > "$F/bin/plain-script"
+printf 'not a script' > "$F/bin/binary"
+head -c 20000 /dev/zero | tr '\0' '#' > "$F/bin/huge"
+chmod +x "$F/bin/osu-lazer" "$F/bin/other-script" "$F/bin/binary" "$F/bin/huge"
 echo fixture-ok

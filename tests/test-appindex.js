@@ -63,3 +63,20 @@ test('appindex: tables, owners, folders, flavored lookups', () => {
     index.add(map, '', 'ignored.desktop');
     eq(map.has(''), false);
 });
+
+test('appindex: entries that only stand for something else', () => {
+    const idx = new AppIndex([
+        {id: 'discord-1216669957799018608.desktop', name: 'Game 1216669957799018608', exec: '/opt/osu/osu %u',
+            noDisplay: true, mimeType: 'x-scheme-handler/discord-1216669957799018608'},
+        {id: 'mount.desktop', name: 'Mounted', exec: '"/tmp/.mount_osu.Ab12/usr/bin/osu!" %u'},
+        {id: 'hidden.desktop', name: 'Hidden', exec: '/opt/hidden/run', noDisplay: true, mimeType: 'text/plain;x-scheme-handler/h;'},
+        {id: 'handler.desktop', name: 'Handler', exec: '/opt/handler/run', mimeType: 'x-scheme-handler/x'},
+        {id: 'nodisplay.desktop', name: 'No Display', exec: '/opt/nd/run', noDisplay: true},
+    ]);
+    eq(idx.lookup('osu'), null, 'a hidden URI handler');
+    eq(idx.name.get('mounted'), undefined, 'run from an AppImage\'s mount');
+    eq(idx.lookup('run'), 'hidden.desktop', 'hidden, but not only a handler');
+    eq(idx.name.get('handler'), 'handler.desktop', 'a handler shown in the app grid');
+    eq(idx.program.get('handler.desktop'), '/opt/handler/run');
+    eq(idx.name.get('nodisplay'), 'nodisplay.desktop', 'hidden, no types');
+});

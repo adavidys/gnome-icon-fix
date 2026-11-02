@@ -43,8 +43,20 @@ export function parseExec(exec) {
     }
 }
 
+// Entries that only stand for something else: a URI handler a program
+// registers for itself (osu! for Discord: "Game 1216669957799018608",
+// hidden, no icon), and anything run from an AppImage's temporary mount,
+// gone when it quits.
+function notAnApp(e) {
+    const types = (e.mimeType ?? '').split(';').filter(Boolean);
+    if (e.noDisplay && types.length && types.every(t => t.startsWith('x-scheme-handler/')))
+        return true;
+    return /(^|[\s"'])\/tmp\/\.mount_[^/\s]+\//.test(e.exec ?? '');
+}
+
 export class AppIndex {
-    // entries: [{id, name, wmClass, exec, icon, path}] (strings, may be null)
+    // entries: [{id, name, wmClass, exec, icon, path, noDisplay, mimeType}]
+    // (strings, may be null; noDisplay a boolean)
     // sources: see sources/registry.js
     constructor(entries, sources = []) {
         this.wmClass = new Map();
@@ -54,6 +66,8 @@ export class AppIndex {
         this.name = new Map();
         // Host path of the program in Exec= -> id
         this.path = new Map();
+        // id -> host path of the program in Exec=, as it is spelled
+        this.program = new Map();
         // Install folder (the program's folder, or Path=) -> id
         this.dir = new Map();
         // id -> name of the source whose launcher the entry runs
@@ -76,6 +90,8 @@ export class AppIndex {
         };
 
         for (const e of entries) {
+            if (notAnApp(e))
+                continue;
             const id = e.id;
             const shortId = id.replace(/\.desktop$/, '').toLowerCase();
             this.add(this.id, shortId, id);
@@ -107,6 +123,7 @@ export class AppIndex {
                     const path = canonical(program.path);
                     if (path) {
                         this.add(this.path, pathKey(path), id);
+                        this.program.set(id, path);
                         noteDir(path.slice(0, path.lastIndexOf('/')), id);
                     }
                 }
