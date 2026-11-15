@@ -2,10 +2,11 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
 import {GAME_EXE, HOME, eq, ok, short, test} from './harness.js';
+import {LAUNCHERS} from '../src/launchers.js';
 import {MARKER, ShortcutMirror, applicationsDir, generatedFiles as filesOf, isGenerated, removeGenerated} from '../src/mirror/base.js';
-import * as bottles from '../src/mirror/bottles-flatpak.js';
+import {LauncherMirror, mirrorFiles, removeMirrored} from '../src/mirror/launcher.js';
 import {MIRRORS} from '../src/mirror/registry.js';
-import * as steam from '../src/mirror/steam-flatpak.js';
+import {LauncherSource} from '../src/sources/launcher.js';
 
 ShortcutMirror.syncDelayMs = 30;
 ShortcutMirror.waitSeconds = 1;
@@ -20,6 +21,15 @@ const read = path => {
     }
 };
 const exists = path => GLib.file_test(path, GLib.FileTest.EXISTS);
+const STEAM_DESC = LAUNCHERS.find(d => d.name === 'steam');
+const BOTTLES_DESC = LAUNCHERS.find(d => d.name === 'bottles');
+const steamFiles = () => mirrorFiles(STEAM_DESC.mirror);
+const bottlesFiles = () => mirrorFiles(BOTTLES_DESC.mirror);
+// A mirror that never ran: what its conversions give.
+const idle = desc => Object.assign(Object.create(LauncherMirror.prototype), {
+    _source: new LauncherSource(desc), _spec: desc.mirror, _flavor: desc.sandbox.toLowerCase(),
+    _prefix: desc.mirror.prefix, _iconDir: desc.mirror.iconDir(),
+});
 
 // Runs the main loop until cond() holds (or ms pass); returns cond().
 function waitFor(cond, ms = 4000) {
@@ -38,27 +48,28 @@ function waitFor(cond, ms = 4000) {
 
 test('mirror: Flatpak Steam shortcuts converted for the host', () => {
     const share = `${STEAM}/.local/share`;
-    const convert = (data, nonSteam) => steam.convertShortcut(share, data, nonSteam);
+    const m = idle(STEAM_DESC);
+    const convert = data => m.convert(data);
     eq(convert('not a key file'), null);
     eq(convert('[Desktop Entry]\nName=x\n'), null, 'no Exec');
     eq(convert('[Desktop Entry]\nName=x\nExec=steam steam://open/news\n'), null);
     const game = convert('[Desktop Entry]\n# a comment\nName=Half-Life\nName[ru]=Халф-Лайф\nExec=steam steam://rungameid/70\nTryExec=steam\nIcon=steam_icon_70\n');
-    eq(game.gameId, '70');
+    eq(game.key, '70');
     ok(game.data.includes('Exec=flatpak run com.valvesoftware.Steam steam://rungameid/70\n'));
     ok(game.data.includes('StartupWMClass=steam_app_70\n'));
     ok(game.data.includes(`Icon=${share}/icons/hicolor/32x32/apps/steam_icon_70.png\n`));
     ok(game.data.includes('Name[ru]=Халф-Лайф') && game.data.includes('# a comment'), 'translations and comments kept');
     ok(!game.data.includes('TryExec') && game.data.includes(`${MARKER}=true`));
-    eq(convert('[Desktop Entry]\nExec=steam steam://rungameid/70\nIcon=/nope.png\n').data.includes('Icon=/nope.png'), true, 'a missing icon file stays as is');
-    eq(convert(`[Desktop Entry]\nExec=steam steam://rungameid/70\nIcon=${HOME}/custom-icon.png\n`).data.includes(`Icon=${HOME}/custom-icon.png`), true);
-    ok(!convert('[Desktop Entry]\nExec=steam steam://rungameid/70\n').data.includes('Icon='), 'no Icon key');
-    const nonSteam = convert('[Desktop Entry]\nName=Game.exe\nExec=steam steam://rungameid/9606503357577428992\nIcon=\n',
-        id => id === '2236688360' ? {name: 'Game', icon: '/icon.png'} : null);
-    eq(nonSteam.gameId, '9606503357577428992');
-    ok(nonSteam.data.includes('Name=Game\n') && nonSteam.data.includes('Icon=/icon.png\n') && !nonSteam.data.includes('StartupWMClass'));
-    const unknown = convert('[Desktop Entry]\nName=Game.exe\nExec=steam steam://rungameid/9606503357577428992\n', () => null);
+    ok(convert(`[Desktop Entry]\nExec=steam steam://rungameid/70\nIcon=${HOME}/custom-icon.png\n`).data.includes(`Icon=${HOME}/custom-icon.png`));
+    ok(convert('[Desktop Entry]\nExec=steam steam://rungameid/70\nIcon=/nope.png\n').data.includes(`Icon=${share}/icons/`), 'a missing icon file: its own');
+    ok(convert('[Desktop Entry]\nExec=steam steam://rungameid/12345\n').data.includes('Icon=com.valvesoftware.Steam\n'), 'none known: Steam\'s');
+    // A non-Steam game: its name and icon from the Flatpak's shortcuts.vdf.
+    const nonSteam = convert('[Desktop Entry]\nName=Game.exe\nExec=steam steam://rungameid/9606503357577428992\nIcon=\n');
+    eq(nonSteam.key, '9606503357577428992', 'named as Steam names it');
+    ok(nonSteam.data.includes('Name=Some Game\n') && nonSteam.data.includes(`Icon=${HOME}/custom-icon.png\n`), nonSteam.data);
+    ok(nonSteam.data.includes('StartupWMClass=steam_app_2236688360\n'), 'its window class');
+    const unknown = convert(`[Desktop Entry]\nName=Game.exe\nExec=steam steam://rungameid/${(12345n << 32n) | 0x2000000n}\n`);
     ok(unknown.data.includes('Name=Game.exe\n'), 'nothing known: left as Steam named it');
-    ok(convert('[Desktop Entry]\nName=Game.exe\nExec=steam steam://rungameid/9606503357577428992\n').data.includes('Name=Game.exe'), 'default lookup');
 });
 
 test('mirror: Flatpak Steam mirror writes, keeps and removes its files', () => {
@@ -67,7 +78,7 @@ test('mirror: Flatpak Steam mirror writes, keeps and removes its files', () => {
     // A file of the same name that Icon Fix didn't create is left alone.
     GLib.mkdir_with_parents(APPS, 0o755);
     GLib.file_set_contents(half, '[Desktop Entry]\nName=Mine\n');
-    const mirror = new steam.FlatpakSteamMirror();
+    const mirror = new LauncherMirror(new LauncherSource(STEAM_DESC));
     try {
         eq(read(half), '[Desktop Entry]\nName=Mine\n');
         ok(read(some).includes('Name=Some Game\n') && read(some).includes(`Icon=${HOME}/custom-icon.png\n`), 'from shortcuts.vdf');
@@ -82,9 +93,9 @@ test('mirror: Flatpak Steam mirror writes, keeps and removes its files', () => {
         GLib.rename(`${HOME}/custom-icon.png`, `${HOME}/custom-icon.off`);
         mirror.sync();
         const icon = read(some).match(/^Icon=(.*)$/m)[1];
-        ok(icon.startsWith(steam.iconDir()) && exists(icon), icon);
-        eq(filesOf('steam-flatpak-', steam.iconDir()).map(f => f.kind).sort(), ['icon', 'shortcut', 'shortcut', 'shortcut']);
-        eq(steam.generatedFiles().length, 4);
+        ok(icon.startsWith(STEAM_DESC.mirror.iconDir()) && exists(icon), icon);
+        eq(filesOf('steam-flatpak-', STEAM_DESC.mirror.iconDir()).map(f => f.kind).sort(), ['icon', 'shortcut', 'shortcut', 'shortcut']);
+        eq(steamFiles().length, 4);
         ok(read(`${APPS}/steam-flatpak-53021404823552.desktop`).includes('Name=Gone.exe\n'), 'unknown to shortcuts.vdf: as Steam named it');
         // The icon is picked again: the .exe's copy goes away.
         GLib.rename(`${HOME}/custom-icon.off`, `${HOME}/custom-icon.png`);
@@ -115,7 +126,7 @@ test('mirror: Flatpak Steam mirror writes, keeps and removes its files', () => {
         GLib.chmod(`${APPS}/steam-flatpak-locked.desktop`, 0);
         mirror.sync();
         ok(!exists(`${APPS}/steam-flatpak-90.desktop`) && exists(`${APPS}/steam-flatpak-locked.desktop`));
-        eq(steam.generatedFiles().filter(f => f.kind === 'shortcut').length, 3, 'only readable files of ours');
+        eq(steamFiles().filter(f => f.kind === 'shortcut').length, 3, 'only readable files of ours');
         for (const f of [locked, `${APPS}/other.desktop`, `${APPS}/steam-flatpak-notes.txt`, `${APPS}/steam-flatpak-locked.desktop`]) {
             GLib.chmod(f, 0o644);
             GLib.unlink(f);
@@ -136,33 +147,33 @@ test('mirror: Flatpak Steam mirror writes, keeps and removes its files', () => {
         mirror.destroy();
         GLib.unlink(`${APPS}/steam-flatpak-456.desktop`);
     }
-    steam.FlatpakSteamMirror.removeAll();
-    eq(steam.generatedFiles(), []);
+    removeMirrored(STEAM_DESC.mirror);
+    eq(steamFiles(), []);
 });
 
 test('mirror: Flatpak Bottles shortcuts', () => {
-    const bottle = {dir: `${HOME}/b/Odd "Bottle"`, name: null, programs: []};
+    const m = idle(BOTTLES_DESC);
     const name = 'Say "Hi" $now `x` \\ back';
-    const odd = bottles.programShortcut(bottle, {name, path: null}, `${HOME}/bicons`);
+    const odd = m.gameShortcut({fields: {bottle: ['x'], program: [name]}, bottleName: 'Odd "Bottle"', exe: null});
     // Exec as GLib reads it back: the exact name and bottle.
     const kf = new GLib.KeyFile();
     kf.load_from_bytes(new GLib.Bytes(new TextEncoder().encode(odd)), GLib.KeyFileFlags.NONE);
     eq(GLib.shell_parse_argv(kf.get_string('Desktop Entry', 'Exec'))[1],
         ['flatpak', 'run', '--command=bottles-cli', 'com.usebottles.bottles', 'run', '-p', name, '-b', 'Odd "Bottle"']);
     eq(kf.get_string('Desktop Entry', 'Name'), name);
+    eq(kf.get_string('Desktop Entry', 'Comment'), 'Run in Bottles (Odd "Bottle")');
     ok(odd.includes('Icon=com.usebottles.bottles\n') && !odd.includes('StartupWMClass'), 'no .exe, no window class');
-    const fromExe = bottles.programShortcut({dir: `${HOME}/b`, name: 'B', programs: []}, {name: 'G', path: GAME_EXE}, `${HOME}/bicons`);
-    ok(fromExe.includes(`Icon=${HOME}/bicons/`) && fromExe.includes('StartupWMClass=some game\n'), fromExe);
-    eq(bottles.programShortcut({dir: `${HOME}/b`, name: 'B', programs: []}, {name: 'G', path: `${HOME}/missing.exe`}).includes('Icon=com.usebottles.bottles'), true);
+    const fromExe = m.gameShortcut({fields: {bottle: ['b'], program: ['G'], exe: ['some game']}, bottleName: 'B', exe: GAME_EXE});
+    ok(fromExe.includes(`Icon=${BOTTLES_DESC.mirror.iconDir()}/`) && fromExe.includes('StartupWMClass=some game\n'), fromExe);
 
     const root = `${HOME}/.var/app/com.usebottles.bottles/data/bottles/bottles`;
     // Two programs whose names give the same file name, and one without any.
     GLib.mkdir_with_parents(`${root}/Dupes`, 0o755);
     GLib.file_set_contents(`${root}/Dupes/bottle.yml`,
         `Name: Dupes\nExternal_Programs:\n  a:\n    name: Some-Game\n    path: ${GAME_EXE}\n  b:\n    name: Some Game\n    path: ${GAME_EXE}\n  c:\n    name: '!!!'\n    path: ${GAME_EXE}\n`);
-    const mirror = new bottles.FlatpakBottlesMirror();
+    const mirror = MIRRORS.find(x => x.key === 'flatpak-bottles').start();
     try {
-        const names = bottles.generatedFiles().filter(f => f.kind === 'shortcut').map(f => f.path.split('/').pop()).sort();
+        const names = bottlesFiles().filter(f => f.kind === 'shortcut').map(f => f.path.split('/').pop()).sort();
         eq(names, [
             'bottles-flatpak-dupes-some-game.desktop', 'bottles-flatpak-dupes-x.desktop',
             'bottles-flatpak-somebottle-broken.desktop', 'bottles-flatpak-somebottle-rel.desktop',
@@ -188,8 +199,8 @@ test('mirror: Flatpak Bottles shortcuts', () => {
     } finally {
         mirror.destroy();
     }
-    bottles.FlatpakBottlesMirror.removeAll();
-    eq(bottles.generatedFiles(), []);
+    MIRRORS.find(x => x.key === 'flatpak-bottles').removeAll();
+    eq(bottlesFiles(), []);
 });
 
 test('mirror: base class defaults and failures', () => {
@@ -231,9 +242,9 @@ test('mirror: base class defaults and failures', () => {
     eq(short(filesOf('base-test-', icons).map(f => f.path)), []);
 });
 
+
 test('mirror: registry', () => {
     eq(MIRRORS.map(m => m.key), ['flatpak-steam', 'flatpak-bottles']);
-    eq(MIRRORS.map(m => m.Mirror), [steam.FlatpakSteamMirror, bottles.FlatpakBottlesMirror]);
     for (const m of MIRRORS)
-        ok(m.title && m.description && m.switchTitle && typeof m.module.generatedFiles === 'function', m.key);
+        ok(m.title && m.description && m.switchTitle && m.files().length === 0 && m.iconDir().includes('/icon-fix/'), m.key);
 });

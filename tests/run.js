@@ -15,6 +15,7 @@ import './test-look.js';
 import './test-log.js';
 import './test-appindex.js';
 import './test-sources.js';
+import './test-launchers.js';
 import './test-matcher.js';
 import './test-mirrors.js';
 

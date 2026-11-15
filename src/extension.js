@@ -83,9 +83,9 @@ export default class IconFixExtension extends Extension {
 
         // Optional shortcut mirrors, each behind its own setting.
         this._mirrors = new Map();
-        for (const {key, Mirror} of MIRRORS) {
-            this._settings.connectObject(`changed::${key}`, () => this._syncMirror(key, Mirror, true), this);
-            this._syncMirror(key, Mirror, false);
+        for (const mirror of MIRRORS) {
+            this._settings.connectObject(`changed::${mirror.key}`, () => this._syncMirror(mirror, true), this);
+            this._syncMirror(mirror, false);
         }
 
         this._patch();
@@ -182,16 +182,17 @@ export default class IconFixExtension extends Extension {
     }
 
     // A mirror that fails must not take the rest of the extension down.
-    _syncMirror(key, Mirror, toggled) {
+    // toggled: switched off now, so its files go too.
+    _syncMirror({key, start, removeAll}, toggled) {
         const enabled = this._settings.get_boolean(key);
         try {
             if (enabled && !this._mirrors.has(key)) {
-                this._mirrors.set(key, new Mirror());
+                this._mirrors.set(key, start());
             } else if (!enabled) {
                 this._mirrors.get(key)?.destroy();
                 this._mirrors.delete(key);
                 if (toggled)
-                    Mirror.removeAll();
+                    removeAll();
             }
         } catch (e) {
             log.error(`${key}`, e);
@@ -372,7 +373,7 @@ export default class IconFixExtension extends Extension {
             }).value;
         }
         const shown = path ? new Gio.FileIcon({file: Gio.File.new_for_path(path)}) : icon;
-        const ours = path || this._index.owner.has(app.get_id()) || this._placed.has(app);
+        const ours = path || this._index.owner.has(app.get_id()) || this._index.windows.has(app.get_id()) || this._placed.has(app);
         const gicon = shown && ours ? this._round(shown) : shown;
         const result = gicon && gicon !== icon ? {gicon} : null;
         if (result)

@@ -6,7 +6,7 @@
 // The title is matched separately (matchTitle) because it can change at
 // frame rate (FPS counters) while everything else stays the same.
 
-import {tryCall} from './appindex.js';
+import {tryCall, wineKey} from './appindex.js';
 import {GENERIC_BINARIES, isWineProcess, mappedProgram, programFromArgv, winePrefixOf, wineToHost} from './process.js';
 import {basename, canonical, exeStem, exists, normalize, pathKey} from './util.js';
 
@@ -86,6 +86,12 @@ export function guessPaths(ctx, source) {
 }
 
 function identify(index, sources, ctx) {
+    // A menu entry for exactly this program in exactly this prefix beats
+    // the launchers' guesses by folder.
+    const wine = ctx.wine && ctx.prefix ? ctx.stems.map(stem => index.wine.get(wineKey(ctx.prefix, stem))).find(Boolean) : null;
+    if (wine)
+        return {id: wine, by: 'Wine program', exact: true};
+
     for (const source of sources) {
         const found = tryCall(source, 'identify', ctx, index);
         if (found)
@@ -94,12 +100,11 @@ function identify(index, sources, ctx) {
 
     // A guess must not hand a game one launcher started to another
     // launcher's shortcut for the same game (same name, same folder), nor a
-    // native program to a shortcut that runs a Windows one (a Wine menu
-    // entry with the same program name).
-    const windowsOnly = new Set(sources.filter(s => s.windowsOnly).map(s => s.name));
+    // native program to an entry that runs a Windows one with the same
+    // program name.
     const fits = id => {
         const owner = index.owner.get(id);
-        return !!id && (ctx.wine || !windowsOnly.has(owner)) && (!ctx.launcher || (owner ?? ctx.launcher) === ctx.launcher);
+        return !!id && (ctx.wine || !index.windows.has(id)) && (!ctx.launcher || (owner ?? ctx.launcher) === ctx.launcher);
     };
 
     const keys = {'sandbox id': ctx.sandboxId, 'GTK app id': ctx.gtkId,

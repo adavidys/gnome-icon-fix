@@ -7,15 +7,14 @@ import {basename, canonical, exists, home} from './util.js';
 
 const decoder = new TextDecoder();
 
-// Launchers and interpreters: their names say nothing about which app runs.
+// Interpreters, wrappers and runtimes: their names say nothing about which
+// app runs. Launchers add their own (launchers.js, binaries).
 export const GENERIC_BINARIES = new Set([
     'env', 'sh', 'bash', 'zsh', 'fish', 'dash', 'python', 'python3', 'perl',
     'java', 'mono', 'node', 'electron', 'flatpak', 'snap', 'xdg-open',
-    'gtk-launch', 'steam', 'wine', 'wine64', 'wine-preloader',
-    'wine64-preloader', 'wineserver', 'proton', 'umu-run', 'lutris', 'heroic',
-    'bottles', 'bottles-cli', 'gamemoderun', 'gamescope', 'prime-run',
-    'mangohud', 'pressure-vessel-wrap', 'reaper', 'steam-runtime-launcher-service',
-    'start.exe', 'explorer.exe', 'steam.exe', 'pv-adverb', 'srt-bwrap', 'bwrap',
+    'gtk-launch', 'wine', 'wine64', 'wine-preloader',
+    'wine64-preloader', 'wineserver', 'proton', 'umu-run', 'gamemoderun', 'gamescope', 'prime-run',
+    'mangohud', 'start.exe', 'explorer.exe', 'bwrap',
     'obs-gamecapture', 'strangle', 'firejail', 'nice', 'taskset', 'systemd-run',
 ]);
 

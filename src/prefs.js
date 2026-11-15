@@ -282,7 +282,8 @@ export default class IconFixPreferences extends ExtensionPreferences {
 
     // One optional shortcut mirror (mirror/registry.js): its switch and
     // the files it made.
-    _mirrorGroup(window, {title, description, key, switchTitle, module: mirror}) {
+    _mirrorGroup(window, mirror) {
+        const {title, description, key, switchTitle} = mirror;
         const group = new Adw.PreferencesGroup({title, description});
         const row = new Adw.SwitchRow({
             title: switchTitle,
@@ -305,7 +306,7 @@ export default class IconFixPreferences extends ExtensionPreferences {
         const refresh = () => {
             for (const row of rows)
                 expander.remove(row);
-            const files = mirror.generatedFiles();
+            const files = mirror.files();
             rows = files.map(file => this._fileRow(window, file));
             for (const row of rows)
                 expander.add_row(row);

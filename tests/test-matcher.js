@@ -99,10 +99,11 @@ test('matcher: windows with every launcher, with and without entries', () => {
         'no entries': {
             'steam game by env': [["Half-Life","~/.var/app/com.valvesoftware.Steam/.local/share/icons/hicolor/32x32/apps/steam_icon_70.png","steam_icon_70"]],
             'steam game outside steam': [["Half-Life","~/.var/app/com.valvesoftware.Steam/.local/share/icons/hicolor/32x32/apps/steam_icon_70.png","steam_icon_70"]],
-            'non-steam shortcut': [["Some Game","~/.cache/icon-fix/exe-icons/<sha1>.png",null],["Png Game","~/.cache/icon-fix/exe-icons/<sha1>.png",null]],
-            'flatpak steam, non-steam': [["Some Game","~/.cache/icon-fix/exe-icons/<sha1>.png",null],["Png Game","~/.cache/icon-fix/exe-icons/<sha1>.png",null]],
-            'heroic by env': [["Some Game (Heroic)",null,null],["Png Game","~/.cache/icon-fix/exe-icons/<sha1>.png",null]],
-            'heroic by prefix': [["Some Game (Heroic)",null,null],["Png Game","~/.cache/icon-fix/exe-icons/<sha1>.png",null]],
+            'non-steam shortcut': [["Some Game",EXE_ICON,"steam_icon_2236688360"],["Png Game",EXE_ICON,null]],
+            // The Flatpak's own list of non-Steam games, with the icon picked there.
+            'flatpak steam, non-steam': [["Some Game","~/custom-icon.png","steam_icon_2236688360"],["Png Game",EXE_ICON,null]],
+            'heroic by env': [["Some Game (Heroic)",EXE_ICON,null],["Png Game",EXE_ICON,null]],
+            'heroic by prefix': [["Some Game (Heroic)",EXE_ICON,null],["Png Game",EXE_ICON,null]],
             'heroic flatpak': [["Some Game (Heroic Flatpak)","~/.cache/icon-fix/exe-icons/<sha1>.png",null],["Png Game","~/.cache/icon-fix/exe-icons/<sha1>.png",null]],
             'lutris native': [["Named In Lutris","~/.var/app/net.lutris.Lutris/data/icons/hicolor/128x128/apps/lutris_some-game.png","lutris_some-game"],["Png Game","~/.cache/icon-fix/exe-icons/<sha1>.png",null]],
             'lutris prefix only': [[null,"~/.var/app/net.lutris.Lutris/data/icons/hicolor/128x128/apps/lutris_some-game.png","lutris_some-game"],["Png Game","~/.cache/icon-fix/exe-icons/<sha1>.png",null]],
@@ -110,7 +111,9 @@ test('matcher: windows with every launcher, with and without entries', () => {
             'bottles flatpak': [["Some Game","~/.var/app/com.usebottles.bottles/data/bottles/bottles/SomeBottle/icons/Some Game.png",null],["Png Game","~/.cache/icon-fix/exe-icons/<sha1>.png",null]],
             'bottles native': [["Some Game","~/.local/share/bottles/bottles/SomeBottle/icons/Some Game.png",null],["Png Game","~/.cache/icon-fix/exe-icons/<sha1>.png",null]],
             'plain wine, menu entry': [["game","~/.cache/icon-fix/exe-icons/<sha1>.png",null]],
-            'plain wine, game folder': [["Some Game (Heroic)",null,null],[null,"~/.var/app/net.lutris.Lutris/data/icons/hicolor/128x128/apps/lutris_some-game.png","lutris_some-game"],["Png Game","~/.cache/icon-fix/exe-icons/<sha1>.png",null]],
+            // Every launcher that has the game in this folder, the strongest first.
+            'plain wine, game folder': [["Some Game (Heroic)",EXE_ICON,null],["Some Game",EXE_ICON,"steam_icon_2236688360"],
+                ["Some Game","~/.local/share/bottles/bottles/SomeBottle/icons/Some Game.png",null],[null,LUTRIS_ICON,"lutris_some-game"],["Png Game",EXE_ICON,null]],
         },
     };
     for (const [label, entries] of [['entries', ENTRIES], ['no entries', []]]) {
@@ -128,7 +131,9 @@ test('matcher: the .exe a process has mapped, whatever its drive letter', () => 
         eq(windowContext(hints).paths, [GAME_EXE]);
         const sources = createSources();
         eq(outcome(matchWindow(new AppIndex([], sources), sources, hints)),
-            [['Some Game (Heroic)', null, null], [null, LUTRIS_ICON, 'lutris_some-game'], ['Png Game', EXE_ICON, null]]);
+            [['Some Game (Heroic)', EXE_ICON, null], ['Some Game', EXE_ICON, 'steam_icon_2236688360'],
+                ['Some Game', `~/.local/share/bottles/bottles/SomeBottle/icons/Some Game.png`, null],
+                [null, LUTRIS_ICON, 'lutris_some-game'], ['Png Game', EXE_ICON, null]]);
     } finally {
         kill(pid);
     }

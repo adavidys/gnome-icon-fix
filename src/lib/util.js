@@ -144,20 +144,6 @@ export class StampCache {
     }
 }
 
-// The parsed files of a folder whose names pass filter: the folder is
-// listed again when it changes, each file read again when it does. Files
-// that can't be read or parsed are left out.
-export class FolderCache {
-    constructor(filter, load) {
-        this._lists = new StampCache(dir => listDir(dir).filter(filter));
-        this._files = new StampCache(load);
-    }
-
-    get(dir) {
-        return (this._lists.get(dir) ?? []).map(name => this._files.get(`${dir}/${name}`)).filter(Boolean);
-    }
-}
-
 // Lowercased, since paths taken from a Wine argv don't keep the real case.
 export function pathKey(path) {
     return path.toLowerCase();
@@ -174,12 +160,13 @@ export function isUnder(path, dir) {
 }
 
 const SYSTEM_DIR = /^\/(?:usr|bin|sbin|lib\w*|etc|var|tmp|run|proc|sys|dev|snap|nix|app|boot|srv)(?:\/|$)/;
-// Folders that usually hold many unrelated programs.
-const SHARED_DIR_NAMES = new Set([
+// Folders that usually hold many unrelated programs. Launchers add their
+// libraries' (launchers.js, sharedDirs).
+export const SHARED_DIR_NAMES = new Set([
     'bin', 'sbin', 'applications', 'appimages', 'apps', 'desktop', 'downloads',
     'games', 'scripts', 'programs', 'launchers', 'tools', 'drive_c',
     'program files', 'program files (x86)', 'windows', 'system32', 'syswow64',
-    'common', 'steamapps',
+    'common',
 ]);
 
 // Whether a folder is specific enough to say "a process running from here

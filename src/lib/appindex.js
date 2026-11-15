@@ -5,8 +5,9 @@
 
 import GLib from 'gi://GLib';
 
+import {readLnk} from './lnk.js';
 import * as log from './log.js';
-import {programFromArgv} from './process.js';
+import {execPrefix, isWineBinary, programFromArgv, wineToHost} from './process.js';
 import {canonical, exeStem, isSpecificDir, normalize, pathKey, selfAndParents, stripExt} from './util.js';
 
 // Calls an optional source method; a broken source must not take the
@@ -30,6 +31,12 @@ export const NATIVE = 'native';
 // The flavor a window's process comes from, to compare with an entry's.
 export function flavorOf(ctx) {
     return ctx.launcherSandbox?.toLowerCase() ?? NATIVE;
+}
+
+// A Windows program in a Wine prefix, as index.wine knows it ("Foo Bar.exe"
+// and foobar.exe alike).
+export function wineKey(prefix, stem) {
+    return `${prefix}\n${normalize(stem)}`;
 }
 
 // Exec= -> argv, field codes (%u, %f...) dropped; [] if it can't be parsed.
@@ -75,6 +82,10 @@ export class AppIndex {
         // id -> what runs it: the Flatpak app id its Exec= goes through
         // (lowercased), or 'native'
         this.flavor = new Map();
+        // Wine prefix and program name -> id (wineKey()); ids of entries
+        // that run a Windows program
+        this.wine = new Map();
+        this.windows = new Set();
         // Tables the sources keep for themselves, see map()
         this._maps = new Map();
         this._sourceMaps = new Set();
@@ -119,6 +130,11 @@ export class AppIndex {
                 }
             }
 
+            // A program run through Wine (menu entries winemenubuilder
+            // makes, `wine C:\\...\\game.exe`): known by its prefix and name.
+            if (!claimed && this._indexWine(argv, id))
+                claimed = true;
+
             if (!claimed) {
                 if (program?.flatpak) {
                     this.add(this.exec, program.flatpak, id);
@@ -141,6 +157,26 @@ export class AppIndex {
             if (ids.size === 1 && isSpecificDir(dir))
                 this.dir.set(pathKey(dir), ids.values().next().value);
         });
+    }
+
+    // Indexes an entry that runs a Windows program through Wine by its
+    // prefix and the program's name, and by the name alone (index.exec);
+    // a shortcut (.lnk) by the program it starts and by its own name, as
+    // menu shortcuts are often named like their program. Whether it did.
+    _indexWine(argv, id) {
+        const wine = argv.findIndex(isWineBinary);
+        const program = wine < 0 ? null : programFromArgv(argv.slice(wine));
+        if (!program?.path)
+            return false;
+        const prefix = execPrefix(argv.slice(0, wine));
+        const file = /\.lnk$/i.test(program.path) ? wineToHost(program.path, prefix) : null;
+        const lnk = file ? readLnk(file, prefix) : null;
+        for (const stem of new Set([lnk && exeStem(lnk.program), exeStem(program.path)].filter(Boolean))) {
+            this.add(this.exec, stem, id);
+            this.add(this.wine, wineKey(prefix, stem), id);
+        }
+        this.windows.add(id);
+        return true;
     }
 
     // A table of the given name, for a source's own keys.

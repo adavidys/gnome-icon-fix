@@ -159,27 +159,23 @@ src/
 │   ├── peicon.js       # icon and product name from a Windows .exe
 │   ├── shape.js        # rounded corners for square icons
 │   └── util.js         # paths, file caches
-├── sources/            # one file per launcher, see registry.js for the interface
+├── launchers.js        # the launchers Icon Fix knows, as data: the only place they are named
+├── sources/            # what tells Icon Fix what a window is, see registry.js for the interface
 │   ├── registry.js
-│   ├── launcher.js     # what the launchers share: their keys, prefixes, folders
-│   ├── steam.js
-│   ├── heroic.js
-│   ├── lutris.js
-│   ├── bottles.js
-│   ├── wine.js
+│   ├── launcher.js     # every launcher, from its description: shortcuts, games, prefixes, icons
 │   ├── packaging.js    # Snap, AppImage (through lib/bundle.js)
+│   ├── theme.js        # an icon named after the window or its program
 │   └── exe.js          # last resort: the .exe's own icon
 ├── mirror/               # optional shortcuts, each behind its own setting
-│   ├── registry.js       # the mirrors, their settings and what the preferences say
-│   ├── base.js           # watching, writing and cleaning up generated files
-│   ├── steam-flatpak.js  # Flatpak Steam's sandboxed shortcuts
-│   └── bottles-flatpak.js  # Flatpak Bottles' programs
+│   ├── registry.js       # one for each launcher whose description has one
+│   ├── launcher.js       # a launcher's Flatpak shortcuts, copied out or written for its games
+│   └── base.js           # watching, writing and cleaning up generated files
 ├── metadata.json
 ├── schemas/            # GSettings schema
 └── qr/                 # donation QR codes
 ```
 
-To support another launcher, add a file to `sources/` and list it in `sources/registry.js`; its Flatpak app id goes in the source (`sandbox`), nowhere else. A new shortcut mirror goes in `mirror/registry.js` with its setting in the schema.
+To support another launcher, describe it in `launchers.js`: where it lists its games, how its shortcuts name one, and what a running game says about itself (its environment, window class or prefix). No code of its own is needed. A shortcut mirror for its Flatpak is part of the description too, with its setting in the schema.
 
 | Command | What it does |
 |---|---|

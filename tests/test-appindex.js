@@ -1,5 +1,6 @@
 import {GAME_DIR, HOME, eq, test} from './harness.js';
-import {AppIndex, flavorOf, parseExec, tryCall} from '../src/lib/appindex.js';
+import {matchWindow, windowContext} from '../src/lib/matcher.js';
+import {AppIndex, flavorOf, parseExec, tryCall, wineKey} from '../src/lib/appindex.js';
 import {createSources} from '../src/sources/registry.js';
 
 test('appindex: tryCall survives broken sources', () => {
@@ -60,13 +61,23 @@ test('appindex: tables, owners, folders, flavored lookups', () => {
     eq(index.lookup('org.foo.app'), 'flatpak-app.desktop', 'flatpak app id');
     eq(index.owner.get('lutris-native.desktop'), 'lutris');
     eq(index.owner.get('game.desktop'), undefined);
-    const map = index.map('lutris');
-    eq(index.find(map, 'x', {launcherSandbox: null}), 'lutris-native.desktop');
-    eq(index.find(map, 'x', {launcherSandbox: 'net.lutris.Lutris'}), 'lutris-flatpak.desktop');
-    eq(index.find(map, 'x', {launcherSandbox: 'org.other'}), 'lutris-native.desktop', 'any flavor');
-    eq(index.find(map, null, {}), null);
-    eq(index.find(map, 'nope', {}), null);
-    index.add(map, '', 'ignored.desktop');
+    // A source's own keys, kept per flavor too.
+    const keyed = {name: 'keyed', indexEntry: (e, _argv, idx) => {
+        idx.add(idx.map('keyed'), 'x', e.id);
+        return true;
+    }};
+    const flavored = new AppIndex([
+        {id: 'native.desktop', exec: 'tool run x'},
+        {id: 'flatpak.desktop', exec: 'flatpak run org.Tool.App run x'},
+    ], [keyed]);
+    const map = flavored.map('keyed');
+    eq(flavored.find(map, 'x', {launcherSandbox: null}), 'native.desktop');
+    eq(flavored.find(map, 'x', {launcherSandbox: 'org.tool.app'}), 'flatpak.desktop');
+    eq(flavored.find(map, 'x', {launcherSandbox: 'org.other'}), 'native.desktop', 'any flavor');
+    eq(flavored.find(map, 'x', {launcherSandbox: 'org.other'}, true), null, 'its own flavor only');
+    eq(flavored.find(map, null, {}), null);
+    eq(flavored.find(map, 'nope', {}), null);
+    flavored.add(map, '', 'ignored.desktop');
     eq(map.has(''), false);
 });
 
@@ -85,4 +96,29 @@ test('appindex: entries that only stand for something else', () => {
     eq(idx.name.get('handler'), 'handler.desktop', 'a handler shown in the app grid');
     eq(idx.program.get('handler.desktop'), '/opt/handler/run');
     eq(idx.name.get('nodisplay'), 'nodisplay.desktop', 'hidden, no types');
+});
+
+test('appindex: programs run through Wine, by prefix and name', () => {
+    const prefix = `${HOME}/.wine-game`;
+    const sources = createSources();
+    const idx = new AppIndex([
+        {id: 'game.desktop', exec: `env WINEPREFIX="${prefix}" wine C:\\\\Game\\\\game.exe`},
+        {id: 'lnk.desktop', exec: `env WINEPREFIX=${prefix} wine start /unix ${prefix}/drive_c/users/x/Start\\ Menu/Other\\ Game.lnk`},
+        {id: 'elsewhere.desktop', exec: `env WINEPREFIX=${prefix} wine start "Q:\\\\x\\\\Y.lnk"`},
+        {id: 'launcher.desktop', exec: `env WINEPREFIX=${prefix} wine start /unix "${prefix}/drive_c/users/x/Start Menu/Launcher.lnk"`},
+        {id: 'default.desktop', exec: 'wine "C:\\\\Program Files\\\\App\\\\app.exe"'},
+        {id: 'bare.desktop', exec: 'wine'},
+        {id: 'no-wine.desktop', exec: '/usr/bin/x'},
+    ], sources);
+    eq(['game.desktop', 'bare.desktop', 'no-wine.desktop'].map(id => idx.windows.has(id)), [true, false, false]);
+    eq(idx.wine.get(wineKey(prefix, 'Launcher')), 'launcher.desktop', 'a .lnk by its own name');
+    eq(idx.wine.get(wineKey(prefix, 'game')), 'game.desktop', 'and by its program, the first one');
+    eq(idx.exec.get('launcher'), 'launcher.desktop');
+    eq(idx.exec.get('y'), 'elsewhere.desktop', 'a shortcut on a drive the prefix doesn\'t have');
+    const run = (argv, env) => matchWindow(idx, sources, {proc: {pid: 0, argv, exe: '/usr/bin/wine64-preloader', cwd: '/', env}}).primary;
+    eq(run(['C:\\Game\\game.exe'], {WINEPREFIX: prefix}), {id: 'game.desktop', by: 'Wine program', exact: true});
+    eq(run(['C:\\x\\OtherGame.exe'], {WINEPREFIX: prefix}).id, 'lnk.desktop', '.lnk named like the .exe');
+    eq(run(['C:\\Program Files\\App\\app.exe'], {}).id, 'default.desktop', 'default prefix');
+    eq(run(['C:\\nope.exe'], {WINEPREFIX: prefix}), null);
+    eq(windowContext({proc: {pid: 0, argv: ['/usr/bin/x'], exe: '/usr/bin/x', cwd: '/', env: {}}}).wine, false);
 });

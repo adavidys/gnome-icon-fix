@@ -1,5 +1,4 @@
-// Every launcher and packaging system Icon Fix knows about, strongest
-// signals first.
+// Everything that tells Icon Fix what a window is, strongest signals first.
 //
 // A source is an object with a `name` and any of:
 //
@@ -9,16 +8,12 @@
 //   indexEntry(entry, argv, index) -> boolean
 //       Called for every .desktop entry whenever the index is rebuilt, which
 //       happens often: must not touch the disk. Returns true when the entry
-//       is one of this source's launchers, so its Exec isn't also indexed
-//       as a plain program. Sources keep their keys in index.map(name) and
-//       look them up with index.find(), which prefers the entry of the
-//       window's own flavor (native or the launcher's Flatpak).
+//       is one of this source's launchers' shortcuts, so its Exec isn't
+//       also indexed as a plain program. Sources keep their own tables in
+//       index.map(name).
 //   identify(ctx, index) -> {id} | null
 //       The desktop entry of a window (ctx: see windowContext() in
 //       lib/matcher.js), from exact signals only.
-//   windowsOnly: boolean
-//       Its shortcuts only run Windows programs: a native program is
-//       never guessed to be one of them.
 //   sandbox: string
 //       The launcher's Flatpak app id: windows from that sandbox were
 //       started by it.
@@ -35,35 +30,22 @@
 //       What to show when no entry matched at all: a themed icon name, an
 //       icon file, a display name. Missing icons are skipped by the caller.
 //
-// The launchers (Steam, Heroic, Lutris, Bottles, plain Wine) build on
-// LauncherSource (launcher.js), which does indexEntry() and identify() from
-// their entryKeys() and windowKeys(); each lives in a file of its own laid
-// out the same way: where it keeps its files, how to read them, then the
-// source: its shortcuts (entryKeys, entryIcon), a running game (launched,
-// windowKeys, fallback) and the lookups behind them.
+// The launchers are all one kind of source (launcher.js), each made from
+// its description in launchers.js. The others look at any program: the
+// app bundle it runs from, an icon named after it, its .exe's icon.
 //
 // Sources live while the extension is enabled and cache what they read
-// from disk until the file changes (StampCache, FolderCache in lib/util.js).
+// from disk until the file changes (StampCache in lib/util.js).
 
-import {BottlesSource} from './bottles.js';
+import {LAUNCHERS} from '../launchers.js';
 import {ExeSource} from './exe.js';
-import {HeroicSource} from './heroic.js';
-import {LutrisSource} from './lutris.js';
+import {LauncherSource} from './launcher.js';
 import {PackagingSource} from './packaging.js';
-import {SteamSource} from './steam.js';
 import {ThemeSource} from './theme.js';
-import {WineSource} from './wine.js';
 
 export function createSources() {
     return [
-        // First: a menu entry for exactly this program in exactly this
-        // prefix beats the launchers' guesses by folder.
-        new WineSource(),
-        // Before Steam: a Heroic game may also carry a Steam id via umu.
-        new HeroicSource(),
-        new SteamSource(),
-        new BottlesSource(),
-        new LutrisSource(),
+        ...LAUNCHERS.map(desc => new LauncherSource(desc)),
         new PackagingSource(),
         // Fallbacks only: whatever the launchers know comes first, then an
         // icon named after the window, then the .exe's.
