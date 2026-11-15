@@ -9,6 +9,8 @@ import './test-formats.js';
 import './test-process.js';
 import './test-peicon.js';
 import './test-lnk.js';
+import './test-bundle.js';
+import './test-shape.js';
 import './test-look.js';
 import './test-log.js';
 import './test-appindex.js';

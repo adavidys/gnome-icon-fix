@@ -1,5 +1,5 @@
 // Preferences window: a General page with where icons and names come
-// from (draggable orders), a Flatpak page with the optional Flatpak Steam
+// from (draggable orders) and how icons look, a Flatpak page with the optional Flatpak Steam
 // and Flatpak Bottles shortcuts and the files each created, the Debug page,
 // and a support page with a coin switcher, QR code and copyable address.
 
@@ -14,8 +14,8 @@ import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/ex
 
 import {debugPage} from './debug/page.js';
 import {normalizeOrder} from './lib/look.js';
-import * as bottlesMirror from './mirror/bottles-flatpak.js';
-import * as steamMirror from './mirror/steam-flatpak.js';
+import {DEFAULT_RADIUS} from './lib/shape.js';
+import {MIRRORS} from './mirror/registry.js';
 
 // QR codes in qr/ are generated from these addresses (qrencode -l M -m 2).
 const COINS = [
@@ -104,32 +104,15 @@ export default class IconFixPreferences extends ExtensionPreferences {
         window.add(general);
         general.add(this._orderGroup(settings, 'icon-order', 'Icons', ICON_KINDS));
         general.add(this._orderGroup(settings, 'name-order', 'Names', NAME_KINDS));
+        general.add(this._appearanceGroup(settings));
 
         const flatpak = new Adw.PreferencesPage({
             title: 'Flatpak',
             icon_name: 'package-x-generic-symbolic',
         });
         window.add(flatpak);
-        flatpak.add(this._mirrorGroup(window, {
-            title: 'Flatpak Steam',
-            description: 'Steam from Flathub keeps its game shortcuts inside its sandbox, ' +
-                'so GNOME can\'t find them. This copies them to ' +
-                '~/.local/share/applications as steam-flatpak-*.desktop files ' +
-                'that launch through Flatpak. Your own .desktop files are never touched.',
-            key: 'flatpak-steam',
-            switchTitle: 'Show Flatpak Steam games',
-            mirror: steamMirror,
-        }));
-        flatpak.add(this._mirrorGroup(window, {
-            title: 'Flatpak Bottles',
-            description: 'Bottles from Flathub can\'t add its programs to the app grid ' +
-                'from its sandbox. This creates a shortcut for each program in your bottles, ' +
-                'as bottles-flatpak-*.desktop files in ~/.local/share/applications. ' +
-                'Your own .desktop files are never touched.',
-            key: 'flatpak-bottles',
-            switchTitle: 'Show Flatpak Bottles programs',
-            mirror: bottlesMirror,
-        }));
+        for (const mirror of MIRRORS)
+            flatpak.add(this._mirrorGroup(window, mirror));
 
         // Debug tab: how GNOME picked each window's app, step by step, and
         // what goes to the journal.
@@ -226,7 +209,44 @@ export default class IconFixPreferences extends ExtensionPreferences {
         });
     }
 
-    // One optional shortcut mirror: its switch and the files it made.
+    // How the icons Icon Fix shows are drawn: rounded corners for square
+    // ones (lib/shape.js).
+    _appearanceGroup(settings) {
+        const group = new Adw.PreferencesGroup({title: 'Appearance'});
+        const round = new Adw.SwitchRow({
+            title: 'Round square icons',
+            subtitle: 'Icons with square corners (from a game\'s .exe, Steam, an AppImage) ' +
+                'get rounded ones like GNOME\'s own. Icons with a shape of their own stay as they are.',
+        });
+        const radius = new Adw.SpinRow({
+            title: 'Corner radius',
+            subtitle: `Percent of the icon's side; GNOME's square icons use about ${DEFAULT_RADIUS}`,
+            adjustment: new Gtk.Adjustment({lower: 1, upper: 50, step_increment: 1, page_increment: 5}),
+        });
+        // 0 is off; the switch remembers the radius it was turned off at.
+        const sync = () => {
+            const value = settings.get_int('corner-radius');
+            round.active = value > 0;
+            radius.sensitive = value > 0;
+            if (value > 0)
+                radius.value = value;
+        };
+        round.connect('notify::active', () => {
+            if (round.active !== settings.get_int('corner-radius') > 0)
+                settings.set_int('corner-radius', round.active ? Math.round(radius.value) || DEFAULT_RADIUS : 0);
+        });
+        radius.connect('notify::value', () => {
+            if (round.active && Math.round(radius.value) !== settings.get_int('corner-radius'))
+                settings.set_int('corner-radius', Math.round(radius.value));
+        });
+        radius.value = DEFAULT_RADIUS;
+        settings.connect('changed::corner-radius', sync);
+        sync();
+        group.add(round);
+        group.add(radius);
+        return group;
+    }
+
     // A list to put .desktop, .exe and GNOME's own in order by dragging the
     // rows; kinds: their titles and subtitles.
     _orderGroup(settings, key, title, kinds) {
@@ -260,7 +280,9 @@ export default class IconFixPreferences extends ExtensionPreferences {
         return group;
     }
 
-    _mirrorGroup(window, {title, description, key, switchTitle, mirror}) {
+    // One optional shortcut mirror (mirror/registry.js): its switch and
+    // the files it made.
+    _mirrorGroup(window, {title, description, key, switchTitle, module: mirror}) {
         const group = new Adw.PreferencesGroup({title, description});
         const row = new Adw.SwitchRow({
             title: switchTitle,

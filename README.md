@@ -28,7 +28,7 @@ When GNOME can't place a window, Icon Fix finds the matching `.desktop` file the
 | **Lutris** | The game's `exe` and Wine prefix from its Lutris config, or its folder | Lutris' `lutris_<slug>` icon |
 | **Bottles** | The program's `.exe` from `bottle.yml` together with `WINEPREFIX`, so two bottles with the same `Launcher.exe` stay apart | The icon Bottles extracted from the `.exe` |
 | **Wine** | Menu entries made by Wine itself, matched by `.exe` and prefix, also through the Windows shortcut (`.lnk`) they start | |
-| **Snap**, **AppImage**, **Flatpak** | `SNAP_NAME`, `APPIMAGE`, the Flatpak app ID | |
+| **Snap**, **AppImage**, **Flatpak** | `SNAP_NAME` or `/snap/<name>/`, the AppImage file (`APPIMAGE`, or the AppImage runtime serving the program's mount), the Flatpak app ID | The name and icon from the `.desktop` entry inside the AppImage or Snap |
 
 Then, for any app:
 
@@ -38,6 +38,8 @@ Then, for any app:
 - **Window title**, as a last resort.
 
 Icons given by name are also looked for in the `pixmaps` folders (`/usr/share/pixmaps`, `~/.local/share/pixmaps`), where many packages put them (osu-lazer-bin's `Icon=osu-lazer`).
+
+An AppImage started straight from a folder, with nothing on the host describing it, still gets its own name and icon: like KDE, Icon Fix reads the `.desktop` entry and icons the AppImage carries inside it (and keeps a copy of the icon in `~/.cache/icon-fix/bundle-icons`, since the AppImage's mount goes away when it quits). An AppImage integrated by AppImageLauncher or Gear Lever joins that entry. This works for Electron AppImages too, whose environment (`APPIMAGE`, `APPDIR`) can't be read from outside.
 
 Entries that only stand for something else are left out: a URI handler a program registers for itself (osu! registers a hidden "Game 1216669957799018608" for Discord) and anything run from an AppImage's temporary mount. An AppImage a package starts through a wrapper script (`/usr/bin/osu-lazer` runs `/opt/osu-lazer/osu.AppImage`) is found through the script. Without any entry, an icon named after the window's class or program in the icon theme is used, as docks on other desktops do.
 
@@ -52,6 +54,10 @@ The **General** tab of the preferences sets, for windows GNOME can't place by it
 - **Default**: what GNOME shows by itself, the launcher's icon and name or a generic one. Nothing below it is ever used.
 
 By default icons come from .desktop, then Application, then Default, and names from Application first, then .desktop, then Default. A game whose shortcut was found stays on it in the dock either way, showing the icon and name the order gives while it runs. With Default first for both, Icon Fix leaves such windows as GNOME has them.
+
+### Rounded icons
+
+Icons taken from a game's `.exe`, Steam's library and many AppImages are plain squares, which look out of place next to GNOME's rounded icons. Under **Appearance** in the **General** tab, **Round square icons** (on by default) rounds their corners like GNOME's own square app icons, by 16 % of the icon's side; **Corner radius** sets how much (1–50 %). It applies to the icons Icon Fix shows for windows and to the icons of launchers' game shortcuts. Icons with transparent corners already have a shape of their own and stay as they are. The rounded copies are kept in `~/.cache/icon-fix/rounded`.
 
 ### Steam from Flathub
 
@@ -85,9 +91,11 @@ GNOME assigns every window from a Flatpak sandbox to that sandbox's app, whateve
 
 Icon Fix moves such windows to the game's own entry, when it can find one, as Dash to Dock does for its file manager windows. The game then gets its own icon in the dock, Alt+Tab and the overview, and clicking it brings the running game up instead of launching it again. The launcher's own windows stay with the launcher.
 
+This holds for any Flatpak, not only these launchers: a window moves to another entry when a launcher started it, when a launcher's own data says which game it is, or when that entry runs through the same Flatpak (a launcher's game shortcuts, LibreOffice's Writer and Calc). A guess by window class or name alone never moves a Flatpak app's window to a native package of the same app. Icons a shortcut names that only some Flatpak app keeps in its own data (`~/.var/app/<id>`) are found there, starting with the app the shortcut runs.
+
 Some launchers don't make an entry at all: Flatpak Bottles can't, and Heroic doesn't for sideloaded games. The game then still gets an entry of its own, kept in memory only while it runs, with the name and icon the launcher knows or, for Windows games, the icon inside the `.exe`.
 
-Shortcuts that Flatpak Lutris creates (**Create application menu shortcut**) name an icon that only exists inside Lutris's sandbox. Icon Fix shows it from there instead of a blank icon.
+Shortcuts that Flatpak Lutris creates (**Create application menu shortcut**) name an icon that only exists inside Lutris's sandbox. Icon Fix shows it from there instead of a blank icon, as for any other Flatpak app.
 
 If you added the same game folder to several launchers, each window is matched to the launcher that actually started it.
 
@@ -141,6 +149,7 @@ src/
 ├── prefs.js            # preferences window
 ├── lib/                # no Shell imports: runs and tests with plain gjs
 │   ├── appindex.js     # lookup tables over the installed .desktop entries
+│   ├── bundle.js       # AppImages and Snaps: the entry and icons they carry
 │   ├── matcher.js      # matching order: sources, class, program, folder, title
 │   ├── process.js      # /proc reading, argv parsing, Wine path translation
 │   ├── formats.js      # YAML (Bottles, Lutris) and VDF (Steam) readers
@@ -148,6 +157,7 @@ src/
 │   ├── look.js         # the icon and name orders of the preferences
 │   ├── lnk.js          # Windows shortcuts (.lnk): the program they start
 │   ├── peicon.js       # icon and product name from a Windows .exe
+│   ├── shape.js        # rounded corners for square icons
 │   └── util.js         # paths, file caches
 ├── sources/            # one file per launcher, see registry.js for the interface
 │   ├── registry.js
@@ -157,9 +167,10 @@ src/
 │   ├── lutris.js
 │   ├── bottles.js
 │   ├── wine.js
-│   ├── packaging.js    # Snap, AppImage
+│   ├── packaging.js    # Snap, AppImage (through lib/bundle.js)
 │   └── exe.js          # last resort: the .exe's own icon
 ├── mirror/               # optional shortcuts, each behind its own setting
+│   ├── registry.js       # the mirrors, their settings and what the preferences say
 │   ├── base.js           # watching, writing and cleaning up generated files
 │   ├── steam-flatpak.js  # Flatpak Steam's sandboxed shortcuts
 │   └── bottles-flatpak.js  # Flatpak Bottles' programs
@@ -168,7 +179,7 @@ src/
 └── qr/                 # donation QR codes
 ```
 
-To support another launcher, add a file to `sources/` and list it in `sources/registry.js`.
+To support another launcher, add a file to `sources/` and list it in `sources/registry.js`; its Flatpak app id goes in the source (`sandbox`), nowhere else. A new shortcut mirror goes in `mirror/registry.js` with its setting in the schema.
 
 | Command | What it does |
 |---|---|

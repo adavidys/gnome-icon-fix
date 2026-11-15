@@ -2,6 +2,7 @@ import GLib from 'gi://GLib';
 
 import {GAME_DIR, GAME_EXE, HOME, eq, ok, short, test} from './harness.js';
 import {AppIndex, tryCall} from '../src/lib/appindex.js';
+import {forgetBundles} from '../src/lib/bundle.js';
 import {windowContext} from '../src/lib/matcher.js';
 import {bottleFromConfig, parseBottlesExec} from '../src/sources/bottles.js';
 import {gamePrefix, installedGames} from '../src/sources/heroic.js';
@@ -396,6 +397,32 @@ test('packaging: Snap and AppImage', () => {
     eq(t.fallback(ctx({})), null);
     eq(p.identify(proc({}), idx), null);
     eq(new AppIndex([{id: 'a_b.desktop', name: 'X'}], sources).map('snap').size, 0, 'no Exec');
+    eq(p.identify(ctx({proc: {pid: 0, argv: [], exe: '/snap/spotify/85/usr/bin/spotify', cwd: '/', env: {}}}), idx),
+        {id: 'spotify_spotify.desktop'}, 'a snap by the folder it runs from');
+});
+
+test('packaging: an AppImage whose environment is gone (Electron)', () => {
+    const p = S('packaging');
+    const mount = `${HOME}/tmp/.mount_Foo AbC`;
+    const run = (pid = 100) => ctx({wmClass: 'FooClass', proc: {pid, argv: [`${mount}/foo`], exe: `${mount}/foo`, cwd: '/', env: {}}});
+    // Nothing serves the fixture's mount in the real /proc: no image file.
+    forgetBundles();
+    eq(p.identify(run(), index([])), null, 'nothing on the host');
+    const fallback = p.fallback(run());
+    eq(fallback.name, 'Foo App', 'the bundle\'s own name');
+    ok(fallback.icon.includes('/bundle-icons/'), 'and icon, kept outside the mount');
+    // A host entry made from the bundle's own.
+    const byClass = index([{id: 'foo-integrated.desktop', exec: '/opt/foo/foo', wmClass: 'fooclass'}]);
+    eq(p.identify(run(), byClass), {id: 'foo-integrated.desktop'});
+    const byIcon = index([{id: 'foo-pkg.desktop', exec: '/usr/bin/foo-pkg', icon: 'foo-icon'}]);
+    eq(p.identify(run(), byIcon), {id: 'foo-pkg.desktop'});
+    eq(p.fallback(ctx({proc: {pid: 0, argv: ['/usr/bin/true'], exe: '/usr/bin/true', cwd: '/', env: {}}})), null);
+    eq(p.fallback(ctx({proc: {pid: 0, argv: [], exe: '/snap/x/1/x', cwd: '/', env: {}}})), null, 'nothing in it');
+    const at = dir => ctx({proc: {pid: 0, argv: [], exe: `${HOME}/tmp/${dir}/x`, cwd: '/', env: {}}});
+    eq(p.fallback(at('.mount_NoIcon')), {icon: null, name: 'No Icon'});
+    eq(p.identify(at('.mount_NoIcon'), byIcon), null, 'an entry without class or icon');
+    ok(p.fallback(at('.mount_Bare')).icon.endsWith('.svg'), 'no entry, an icon');
+    eq(p.fallback(at('.mount_Bare')).name, null);
 });
 
 test('exe: entry icons and fallbacks', () => {

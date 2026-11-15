@@ -108,3 +108,15 @@ test('process: mappedProgram ignores paths only another namespace sees', () => {
         kill(pid);
     }
 });
+
+test('process: a Chromium title split back into argv', () => {
+    const mount = `${HOME}/tmp/.mount_Foo AbC`;
+    eq(process.splitTitle([`${mount}/foo --no-sandbox --x=1`]), [`${mount}/foo`, '--no-sandbox', '--x=1'],
+        'a path with a space');
+    eq(process.splitTitle([`${mount}/foo`]), [`${mount}/foo`], 'a real path stays');
+    eq(process.splitTitle(['/nope/x --y']), ['/nope/x --y'], 'nothing there');
+    eq(process.splitTitle(['x --y']), ['x --y'], 'not a path');
+    eq(process.splitTitle(['/usr/bin/true', '--y z']), ['/usr/bin/true', '--y z'], 'a real argv');
+    eq(process.splitTitle([]), []);
+    eq(process.splitTitle(['/nope']), ['/nope'], 'one word');
+});

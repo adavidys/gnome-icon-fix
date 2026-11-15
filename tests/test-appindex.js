@@ -19,6 +19,12 @@ test('appindex: parseExec and flavors', () => {
     eq(flavorOf({launcherSandbox: 'Net.Lutris.Lutris'}), 'net.lutris.lutris');
     eq(flavorOf({launcherSandbox: null}), 'native');
     eq(flavorOf({}), 'native');
+    const index = new AppIndex([
+        {id: 'a.desktop', exec: 'flatpak run --branch=stable Org.Example.App'},
+        {id: 'b.desktop', exec: '/usr/bin/b'},
+        {id: 'c.desktop', exec: null},
+    ]);
+    eq([...index.flavor], [['a.desktop', 'org.example.app'], ['b.desktop', 'native'], ['c.desktop', 'native']]);
 });
 
 test('appindex: tables, owners, folders, flavored lookups', () => {

@@ -1,7 +1,7 @@
 import {GAME_DIR, GAME_EXE, HOME, eq, short, test} from './harness.js';
 import {kill, spawnMapper} from './test-process.js';
 import {AppIndex} from '../src/lib/appindex.js';
-import {guessPaths, matchTitle, matchWindow, windowContext} from '../src/lib/matcher.js';
+import {guessPaths, leavesSandbox, matchTitle, matchWindow, windowContext} from '../src/lib/matcher.js';
 import {createSources} from '../src/sources/registry.js';
 
 const WGAME = `Z:${GAME_EXE.replace(/\//g, '\\')}`;
@@ -157,8 +157,25 @@ test('matcher: what found an entry, and every fallback with its source', () => {
     eq(['steam game by env', 'native by sandbox id', 'native by gtk id', 'native by class', 'native by instance',
         'native by exact path', 'flatpak app argv', 'native by folder', 'nothing known'].map(by),
     ['steam', 'sandbox id', 'GTK app id', 'window class', 'window instance', 'program path', 'program name', 'install folder', null]);
+    eq(matchWindow(index, sources, CASES.find(([n]) => n === 'steam game by env')[1]).primary.exact, true, 'a source is sure');
+    eq(matchWindow(index, sources, CASES.find(([n]) => n === 'native by class')[1]).primary.exact, undefined, 'a guess');
     const all = matchWindow(index, sources, CASES.find(([n]) => n === 'heroic by env')[1], true);
     eq(all.primary.id, 'heroic_some.desktop');
     eq(all.fallbacks.map(f => f.source), ['heroic', 'theme', 'exe'], 'fallbacks even with an entry');
     eq(matchWindow(index, sources, CASES.find(([n]) => n === 'heroic by env')[1]).fallbacks, [], 'not by default');
+});
+
+test('matcher: which windows leave their Flatpak sandbox\'s app', () => {
+    const index = new AppIndex([
+        {id: 'org.libreoffice.LibreOffice.desktop', exec: 'flatpak run org.libreoffice.LibreOffice'},
+        {id: 'org.libreoffice.LibreOffice.writer.desktop', exec: 'flatpak run org.libreoffice.LibreOffice --writer', wmClass: 'libreoffice-writer'},
+        {id: 'libreoffice-writer.desktop', exec: '/usr/bin/libreoffice --writer'},
+    ]);
+    const sandbox = 'org.libreoffice.LibreOffice';
+    eq(leavesSandbox(index, {id: 'org.libreoffice.LibreOffice.writer.desktop'}, null, sandbox), true, 'another entry of the same app');
+    eq(leavesSandbox(index, {id: 'libreoffice-writer.desktop'}, null, sandbox), false, 'a native package, by a guess');
+    eq(leavesSandbox(index, {id: 'libreoffice-writer.desktop', exact: true}, null, sandbox), true, 'a source is sure');
+    eq(leavesSandbox(index, {id: 'libreoffice-writer.desktop'}, 'steam', sandbox), true, 'a launcher started it');
+    eq(leavesSandbox(index, null, 'steam', sandbox), false);
+    eq(leavesSandbox(index, {id: 'x.desktop'}, null, null), false, 'not sandboxed');
 });

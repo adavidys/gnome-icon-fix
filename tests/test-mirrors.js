@@ -4,6 +4,7 @@ import GLib from 'gi://GLib';
 import {GAME_EXE, HOME, eq, ok, short, test} from './harness.js';
 import {MARKER, ShortcutMirror, applicationsDir, generatedFiles as filesOf, isGenerated, removeGenerated} from '../src/mirror/base.js';
 import * as bottles from '../src/mirror/bottles-flatpak.js';
+import {MIRRORS} from '../src/mirror/registry.js';
 import * as steam from '../src/mirror/steam-flatpak.js';
 
 ShortcutMirror.syncDelayMs = 30;
@@ -228,4 +229,11 @@ test('mirror: base class defaults and failures', () => {
     removeGenerated('base-test-', icons);
     ok(!exists(ours));
     eq(short(filesOf('base-test-', icons).map(f => f.path)), []);
+});
+
+test('mirror: registry', () => {
+    eq(MIRRORS.map(m => m.key), ['flatpak-steam', 'flatpak-bottles']);
+    eq(MIRRORS.map(m => m.Mirror), [steam.FlatpakSteamMirror, bottles.FlatpakBottlesMirror]);
+    for (const m of MIRRORS)
+        ok(m.title && m.description && m.switchTitle && typeof m.module.generatedFiles === 'function', m.key);
 });

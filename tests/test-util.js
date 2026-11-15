@@ -88,18 +88,33 @@ test('util: paths and folders', () => {
     eq(util.isSpecificDir('/opt/some-app'), true);
 });
 
-test('util: hicolor icons, also inside launcher sandboxes', () => {
+test('util: hicolor icons, also inside any Flatpak app\'s data', () => {
     const share = `${HOME}/.var/app/net.lutris.Lutris/data`;
     eq(util.findHicolorIcon(share, null), null);
     eq(short(util.findHicolorIcon(share, 'lutris_some-game')),
         '~/.var/app/net.lutris.Lutris/data/icons/hicolor/128x128/apps/lutris_some-game.png');
     eq(util.findHicolorIcon(share, 'nope'), null);
-    ok(util.LAUNCHER_SANDBOXES.has('com.usebottles.bottles'));
+    eq(short(util.findHicolorIcon(`${HOME}/.var/app/org.example.Runner/data`, 'runner_game')),
+        '~/.var/app/org.example.Runner/data/icons/hicolor/scalable/apps/runner_game.svg', 'scalable');
     eq(short(util.findSandboxedIcon('steam_icon_70')),
         '~/.var/app/com.valvesoftware.Steam/.local/share/icons/hicolor/32x32/apps/steam_icon_70.png');
+    eq(short(util.findSandboxedIcon('steam_icon_70', ['ORG.example.runner', 'not.installed'])),
+        '~/.var/app/org.example.Runner/data/icons/hicolor/scalable/apps/steam_icon_70.svg', 'the shortcut\'s own app first');
     eq(short(util.findSandboxedIcon('lutris_some-game')),
         '~/.var/app/net.lutris.Lutris/data/icons/hicolor/128x128/apps/lutris_some-game.png');
+    eq(short(util.findSandboxedIcon('runner_game')),
+        '~/.var/app/org.example.Runner/data/icons/hicolor/scalable/apps/runner_game.svg', 'any app, not only launchers');
     eq(util.findSandboxedIcon('nope'), null);
+    eq(util.findSandboxedIcon(null), null);
+    eq(util.findSandboxedIcon('/abs/path.png'), null);
+    ok(util.cacheDir('x').endsWith('/.cache/icon-fix/x'));
+    // No Flatpak app ever run.
+    GLib.rename(`${HOME}/.var/app`, `${HOME}/.var/app.away`);
+    try {
+        eq(util.findSandboxedIcon('runner_game'), null);
+    } finally {
+        GLib.rename(`${HOME}/.var/app.away`, `${HOME}/.var/app`);
+    }
     // Pixmaps folders, under the user's data dir first
     GLib.mkdir_with_parents(`${HOME}/.local/share/pixmaps`, 0o755);
     GLib.file_set_contents(`${HOME}/.local/share/pixmaps/old-app.xpm`, 'x');

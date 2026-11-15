@@ -15,6 +15,8 @@ function key(prefix, stem) {
 export class WineSource extends LauncherSource {
     constructor() {
         super('wine');
+        // Its shortcuts only ever run Windows programs (lib/matcher.js).
+        this.windowsOnly = true;
     }
 
     entryKeys(entry, argv, index) {

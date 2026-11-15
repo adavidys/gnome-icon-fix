@@ -1,7 +1,7 @@
 // GNOME matches every window from a Flatpak sandbox to that sandbox's app,
 // whatever StartupWMClass says. For launchers from Flathub that means every
-// game shows up as "Steam" (or Heroic, Lutris, Bottles) in the dock and
-// Alt+Tab. And a game it can't match at all gets an app made up for its
+// game shows up as "Steam" (or Heroic, Lutris, Bottles, or any other
+// Flatpak that runs programs) in the dock and Alt+Tab. And a game it can't match at all gets an app made up for its
 // window, apart from the game's entry pinned in the dock. The window
 // tracker is C code we can't change, so, like Dash to Dock does for its
 // file manager locations, we move such windows over in the JS layer
@@ -16,7 +16,6 @@ import Shell from 'gi://Shell';
 import {InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import * as log from './lib/log.js';
-import {LAUNCHER_SANDBOXES} from './lib/util.js';
 
 // Gio.DesktopAppInfo moved to GioUnix in newer GLib.
 let DesktopAppInfo;
@@ -239,7 +238,9 @@ export class WindowSplitter {
         if (current && (host === current.host || host === current.app) &&
             this._findApp(win, this, current.host) === current.app)
             return;
-        const app = host && (LAUNCHER_SANDBOXES.has(win.get_sandboxed_app_id()) || host.is_window_backed())
+        // A window GNOME made up an app for, or gave to its Flatpak
+        // sandbox's app whatever it runs.
+        const app = host && (win.get_sandboxed_app_id() || host.is_window_backed())
             ? this._findApp(win, this, host) : null;
         if (!app || !host || app === host) {
             if (current)
@@ -262,6 +263,11 @@ export class WindowSplitter {
         log.debug(`window "${win.get_title()}" back to the app GNOME gave it (closed or no longer matched)`);
         this._moved.delete(win);
         this._queueRefresh();
+    }
+
+    // The app GNOME itself gives a window.
+    gnomeApp(win) {
+        return this._gnomeApp(win);
     }
 
     // Whether app has windows moved to it.

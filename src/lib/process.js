@@ -116,6 +116,21 @@ export function mappedProgram(pid, program) {
     return null;
 }
 
+// Chromium and Electron programs rewrite their process title: the whole
+// command line becomes one string ("/opt/App/app --no-sandbox"), and the
+// environment after it reads empty. Split such a title back into argv at
+// the longest beginning that is a file, as paths may hold spaces too.
+export function splitTitle(argv) {
+    if (argv.length !== 1 || !argv[0].startsWith('/') || !argv[0].includes(' ') || exists(argv[0]))
+        return argv;
+    const title = argv[0];
+    for (let end = title.lastIndexOf(' '); end > 0; end = title.lastIndexOf(' ', end - 1)) {
+        if (exists(title.slice(0, end)))
+            return [title.slice(0, end), ...title.slice(end + 1).split(' ').filter(Boolean)];
+    }
+    return argv;
+}
+
 // envKeys: the environment variables to keep (all of a Proton game's
 // environment is tens of kilobytes; the sources need a handful).
 export function readProcess(pid, envKeys) {
@@ -124,7 +139,7 @@ export function readProcess(pid, envKeys) {
         return info;
 
     try {
-        info.argv = decoder.decode(GLib.file_get_contents(`/proc/${pid}/cmdline`)[1]).split('\0').filter(Boolean);
+        info.argv = splitTitle(decoder.decode(GLib.file_get_contents(`/proc/${pid}/cmdline`)[1]).split('\0').filter(Boolean));
     } catch {}
 
     for (const link of ['exe', 'cwd']) {

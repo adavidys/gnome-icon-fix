@@ -16,6 +16,9 @@
 //   identify(ctx, index) -> {id} | null
 //       The desktop entry of a window (ctx: see windowContext() in
 //       lib/matcher.js), from exact signals only.
+//   windowsOnly: boolean
+//       Its shortcuts only run Windows programs: a native program is
+//       never guessed to be one of them.
 //   sandbox: string
 //       The launcher's Flatpak app id: windows from that sandbox were
 //       started by it.

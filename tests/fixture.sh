@@ -282,4 +282,42 @@ printf '#!/bin/sh\nexec /usr/bin/true\n' > "$F/bin/plain-script"
 printf 'not a script' > "$F/bin/binary"
 head -c 20000 /dev/zero | tr '\0' '#' > "$F/bin/huge"
 chmod +x "$F/bin/osu-lazer" "$F/bin/other-script" "$F/bin/binary" "$F/bin/huge"
+# An AppImage's mount while it runs (lib/bundle.js): AppRun, its entry and
+# icons; the name has a space, as mountinfo escapes it.
+M="$F/tmp/.mount_Foo AbC"
+mkdir -p "$M/usr/share/icons/hicolor/64x64/apps" "$M/usr/lib" "$M/sub"
+printf '#!/bin/sh\n' > "$M/AppRun"
+printf 'binary' > "$M/foo"
+png "$M/helper.png"
+printf '[Desktop Entry]\nType=Application\nName=Foo App\nName[de]=Foo-Programm\nIcon=foo-icon\nStartupWMClass=FooClass\nExec=AppRun %%U\n' > "$M/foo.desktop"
+printf '[Desktop Entry]\nType=Application\nName=Helper\nIcon=helper\n' > "$M/a-helper.desktop"
+png "$M/usr/share/icons/hicolor/64x64/apps/foo-icon.png"
+ln -s usr/share/icons/hicolor/64x64/apps/foo-icon.png "$M/.DirIcon"
+# One with no entry, just a .DirIcon; one whose entry names an icon it lacks
+mkdir -p "$F/tmp/.mount_Bare" "$F/tmp/.mount_NoIcon/opt"
+printf '#!/bin/sh\n' > "$F/tmp/.mount_Bare/AppRun"
+printf '<svg xmlns="http://www.w3.org/2000/svg"/>' > "$F/tmp/.mount_Bare/.DirIcon"
+printf '#!/bin/sh\n' > "$F/tmp/.mount_NoIcon/AppRun"
+printf '[Desktop Entry]\nType=Link\nName=Not an app\n' > "$F/tmp/.mount_NoIcon/link.desktop"
+printf '[Desktop Entry]\nName=No Icon\nStartupWMClass=\n' > "$F/tmp/.mount_NoIcon/noicon.desktop"
+printf 'not a key file\n[' > "$F/tmp/.mount_NoIcon/broken.desktop"
+# A folder with AppRun but nothing else isn't an AppDir
+mkdir -p "$F/tmp/not-appdir/bin"
+printf '#!/bin/sh\n' > "$F/tmp/not-appdir/AppRun"
+# What /proc shows while it runs: the program, and the AppImage runtime
+# serving the mount (with a farther copy of the same file name)
+P="$F/proc"
+mkdir -p "$P/100" "$P/104" "$P/300" "$P/99" "$P/98" "$P/self" "$F/elsewhere"
+printf 'not really an appimage' > "$F/elsewhere/Foo-1.0.AppImage"
+ESC=$(printf '%s' "$M" | sed 's/ /\\040/g')
+printf '36 68 0:79 / /other ro - ext4 /dev/vda ro\n924 68 0:120 / %s ro,nosuid shared:961 - fuse.Foo-1.0.AppImage Foo-1.0.AppImage ro\n' "$ESC" > "$P/100/mountinfo"
+printf '924 68 0:120 / /tmp/.mount_Bare ro - fuse.thing notanimage ro\n' > "$P/99/mountinfo"
+printf '924 68 0:120 / %s ro - fuse.Gone.AppImage Gone.AppImage ro\n' "$ESC" > "$P/98/mountinfo"
+ln -s "$M/foo" "$P/100/exe"
+ln -s "$F/Applications/Foo-1.0.AppImage" "$P/104/exe"
+ln -s "$F/elsewhere/Foo-1.0.AppImage" "$P/300/exe"
+# A Flatpak app no launcher list knows, keeping icons of its own
+mkdir -p "$F/.var/app/org.example.Runner/data/icons/hicolor/scalable/apps" "$F/.var/app/org.example.Empty/data"
+printf '<svg xmlns="http://www.w3.org/2000/svg"/>' > "$F/.var/app/org.example.Runner/data/icons/hicolor/scalable/apps/runner_game.svg"
+png "$F/.var/app/org.example.Runner/data/icons/hicolor/scalable/apps/steam_icon_70.svg"
 echo fixture-ok

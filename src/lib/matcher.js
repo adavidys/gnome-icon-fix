@@ -89,15 +89,17 @@ function identify(index, sources, ctx) {
     for (const source of sources) {
         const found = tryCall(source, 'identify', ctx, index);
         if (found)
-            return {...found, by: source.name};
+            return {...found, by: source.name, exact: true};
     }
 
     // A guess must not hand a game one launcher started to another
     // launcher's shortcut for the same game (same name, same folder), nor a
-    // native program to a Wine menu entry with the same program name.
+    // native program to a shortcut that runs a Windows one (a Wine menu
+    // entry with the same program name).
+    const windowsOnly = new Set(sources.filter(s => s.windowsOnly).map(s => s.name));
     const fits = id => {
         const owner = index.owner.get(id);
-        return !!id && (ctx.wine || owner !== 'wine') && (!ctx.launcher || (owner ?? ctx.launcher) === ctx.launcher);
+        return !!id && (ctx.wine || !windowsOnly.has(owner)) && (!ctx.launcher || (owner ?? ctx.launcher) === ctx.launcher);
     };
 
     const keys = {'sandbox id': ctx.sandboxId, 'GTK app id': ctx.gtkId,
@@ -126,7 +128,8 @@ function identify(index, sources, ctx) {
 // Returns {primary, fallbacks, launcher}: primary is {id} of a desktop entry or null;
 // fallbacks (only looked for without a primary) are what the sources would
 // show instead, best first: [{iconName?, icon?, name?, source}]. primary.by
-// says what found it (a source's name, or the kind of guess).
+// says what found it (a source's name, or the kind of guess), primary.exact
+// whether a source did.
 // all: also look for fallbacks when there is a primary (the Debug tab
 // shows what else could have been used). launcher: the name of the source
 // whose launcher started the window, or null (for matchTitle()).
@@ -145,6 +148,22 @@ export function matchWindow(index, sources, hints, all = false) {
         }),
         launcher: ctx.launcher,
     };
+}
+
+// Whether a window from a Flatpak sandbox (sandbox: its app id), which
+// GNOME gives to that sandbox's own app whatever it is, may go to the entry
+// found for it (primary, launcher: as matchWindow() returns them):
+//   - a launcher started it (Steam, Heroic... from Flathub run their games
+//     inside their own sandbox), or
+//   - a source knows it for sure (a Steam app id, an AppImage's file), or
+//   - the entry runs through the same sandbox: another entry of that app
+//     (LibreOffice's Writer and Calc, a launcher's own game shortcuts).
+// A guess by name or class alone could hand a Flatpak app's window to a
+// native package of the same app, so it doesn't count.
+export function leavesSandbox(index, primary, launcher, sandbox) {
+    if (!primary?.id || !sandbox)
+        return false;
+    return !!launcher || !!primary.exact || index.flavor.get(primary.id) === sandbox.toLowerCase();
 }
 
 // launcher: as matchWindow() returns it. A game one launcher started

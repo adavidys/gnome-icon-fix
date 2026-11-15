@@ -45,6 +45,11 @@ export function sandboxDir(id, ...parts) {
     return home('.var', 'app', id, ...parts);
 }
 
+// Icon Fix's own cache: ~/.cache/icon-fix/...
+export function cacheDir(...parts) {
+    return GLib.build_filenamev([GLib.get_user_cache_dir(), 'icon-fix', ...parts]);
+}
+
 export function configDir(...parts) {
     return GLib.build_filenamev([GLib.get_user_config_dir(), ...parts]);
 }
@@ -192,15 +197,15 @@ export function isSpecificDir(dir) {
 }
 
 // Largest first: GNOME scales the absolute-path icon down as needed.
-const ICON_SIZES = ['256x256', '128x128', '96x96', '64x64', '48x48', '32x32', '24x24', '16x16'];
+const ICON_SIZES = ['scalable', '1024x1024', '512x512', '256x256', '128x128', '96x96', '64x64', '48x48', '32x32', '24x24', '16x16'];
 
 // A hicolor icon outside the icon theme's search path (inside a Flatpak's
-// private data dir) as an absolute path, or null.
+// private data dir, or a bundle) as an absolute path, or null.
 export function findHicolorIcon(share, name) {
     if (!name)
         return null;
     for (const size of ICON_SIZES) {
-        for (const ext of ['png', 'svg']) {
+        for (const ext of size === 'scalable' ? ['svg'] : ['png', 'svg']) {
             const path = GLib.build_filenamev([share, 'icons', 'hicolor', size, 'apps', `${name}.${ext}`]);
             if (exists(path))
                 return path;
@@ -227,22 +232,24 @@ export function findPixmap(name) {
     return null;
 }
 
-// Game launchers from Flathub. Their games run inside their sandbox, and
-// the icons they make for game shortcuts stay in it.
-export const LAUNCHER_SANDBOXES = new Set([
-    'com.valvesoftware.Steam',
-    'com.heroicgameslauncher.hgl',
-    'net.lutris.Lutris',
-    'com.usebottles.bottles',
-]);
+// The data folders of the Flatpak apps the user has run (~/.var/app/<id>),
+// where an app keeps what it makes for others: the icons of the shortcuts
+// a launcher creates (Flatpak Lutris: lutris_<slug>, Flatpak Steam:
+// steam_icon_<id>) stay in it, out of the icon theme's reach.
+const sandboxes = new StampCache(dir => listDir(dir).sort());
 
-// An icon a launcher's shortcut names but only that launcher's sandbox
-// has (Flatpak Lutris: lutris_<slug>, Flatpak Steam: steam_icon_<id>), as
-// an absolute path, or null.
-export function findSandboxedIcon(name) {
-    for (const id of LAUNCHER_SANDBOXES) {
+// An icon a shortcut names but only some Flatpak app's own data has, as
+// an absolute path, or null. first: the app ids to look in before the
+// others (the app the shortcut runs), in any case.
+export function findSandboxedIcon(name, first = []) {
+    if (!name || name.includes('/'))
+        return null;
+    const all = sandboxes.get(home('.var', 'app')) ?? [];
+    const wanted = first.map(id => id.toLowerCase());
+    const ids = new Set([...all.filter(id => wanted.includes(id.toLowerCase())), ...all]);
+    for (const id of ids) {
         for (const share of [sandboxDir(id, 'data'), sandboxDir(id, '.local', 'share')]) {
-            // Most of these launchers aren't installed: one check, not 16.
+            // Most apps keep no icons: one check, not dozens.
             if (!exists(`${share}/icons/hicolor`))
                 continue;
             const path = findHicolorIcon(share, name);

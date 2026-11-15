@@ -25,7 +25,7 @@ export function tryCall(source, method, ...args) {
 
 // What runs an entry's launcher: the Flatpak app id (lowercased) when Exec
 // goes through `flatpak run`, 'native' otherwise.
-const NATIVE = 'native';
+export const NATIVE = 'native';
 
 // The flavor a window's process comes from, to compare with an entry's.
 export function flavorOf(ctx) {
@@ -72,6 +72,9 @@ export class AppIndex {
         this.dir = new Map();
         // id -> name of the source whose launcher the entry runs
         this.owner = new Map();
+        // id -> what runs it: the Flatpak app id its Exec= goes through
+        // (lowercased), or 'native'
+        this.flavor = new Map();
         // Tables the sources keep for themselves, see map()
         this._maps = new Map();
         this._sourceMaps = new Set();
@@ -104,6 +107,7 @@ export class AppIndex {
             const argv = parseExec(e.exec);
             const program = programFromArgv(argv);
             this._flavor = program?.flatpak ?? NATIVE;
+            this.flavor.set(id, this._flavor);
 
             // Every source sees every entry (Steam also indexes Icon=), any
             // of them can claim it as its launcher.
