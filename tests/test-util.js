@@ -123,3 +123,23 @@ test('util: hicolor icons, also inside any Flatpak app\'s data', () => {
     eq(util.findPixmap('a/b'), null, 'a path, not a name');
     eq(util.findPixmap(null), null);
 });
+
+test('util: icons copied under a name made from their picture', () => {
+    const icon = `${HOME}/changing-icon.png`;
+    GLib.file_set_contents(icon, 'first picture');
+    const first = util.copyByContent(icon, 'test-copies');
+    ok(/\/\.cache\/icon-fix\/test-copies\/[0-9a-f]{40}\.png$/.test(first), first);
+    eq(util.copyByContent(icon, 'test-copies'), first, 'once');
+    // A new picture saved over it: a new name, so the Shell shows it.
+    GLib.usleep(10000);
+    GLib.file_set_contents(icon, 'second picture, saved over it');
+    const second = util.copyByContent(icon, 'test-copies');
+    ok(second !== first && second.endsWith('.png'));
+    // The copy removed (the cache cleaned): made again.
+    GLib.unlink(second);
+    eq(util.copyByContent(icon, 'test-copies'), second);
+    ok(GLib.file_test(second, GLib.FileTest.EXISTS));
+    eq(util.copyByContent(`${HOME}/nope.png`, 'test-copies'), null);
+    GLib.file_set_contents(`${HOME}/noext`, '<svg xmlns="http://www.w3.org/2000/svg"/>');
+    ok(util.copyByContent(`${HOME}/noext`, 'test-copies').endsWith('.svg'), 'no extension: an SVG by its content');
+});

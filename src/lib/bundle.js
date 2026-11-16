@@ -19,7 +19,7 @@
 
 import GLib from 'gi://GLib';
 
-import {basename, cacheDir, canonical, exists, findHicolorIcon, isUnder, listDir, selfAndParents} from './util.js';
+import {basename, canonical, copyByContent, exists, findHicolorIcon, isUnder, listDir, selfAndParents} from './util.js';
 
 const decoder = new TextDecoder();
 const ICON_EXTS = ['png', 'svg', 'xpm'];
@@ -139,25 +139,7 @@ export function bundleIcon(root, icon, {shares = [], dirs = []} = {}) {
 // the program quits, while GNOME may still draw its icon. Named after its
 // content, so every launch reuses the same file. null if it can't be read.
 export function keepIcon(path) {
-    let bytes;
-    try {
-        bytes = GLib.file_get_contents(path)[1];
-    } catch {
-        return null;
-    }
-    // .DirIcon has no extension: an SVG is told by its first bytes.
-    const ext = /^\s*(<\?xml|<svg)/.test(decoder.decode(bytes.slice(0, 64))) ? 'svg' : 'png';
-    const dir = cacheDir('bundle-icons');
-    const out = `${dir}/${GLib.compute_checksum_for_bytes(GLib.ChecksumType.SHA1, bytes)}.${ext}`;
-    if (!exists(out)) {
-        try {
-            GLib.mkdir_with_parents(dir, 0o755);
-            GLib.file_set_contents(out, bytes);
-        } catch {
-            return null;
-        }
-    }
-    return out;
+    return copyByContent(path, 'bundle-icons');
 }
 
 // What a bundle says about itself: its entry (the one whose name or icon

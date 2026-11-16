@@ -26,7 +26,7 @@ import {leavesSandbox, matchTitle, matchWindow} from './lib/matcher.js';
 import {forgetRead} from './lib/peicon.js';
 import {readProcess} from './lib/process.js';
 import {forgetRounded, roundedIcon} from './lib/shape.js';
-import {findPixmap, findSandboxedIcon} from './lib/util.js';
+import {cacheDir, copyByContent, findPixmap, findSandboxedIcon} from './lib/util.js';
 import {MIRRORS} from './mirror/registry.js';
 import {createSources, envKeys} from './sources/registry.js';
 import {WindowSplitter} from './split.js';
@@ -422,7 +422,7 @@ export default class IconFixExtension extends Extension {
     // In the icon order: the .desktop's own (where its launcher put it), the
     // .exe's, or none (GNOME's blank one).
     // The icons of Icon Fix's entries (a launcher's game shortcuts, entries
-    // it found for windows) are rounded when square (_round()).
+    // it found for windows) are rounded when square (_shownIcon()).
     _entryIcon(app) {
         const cached = this._cache.get(app);
         if (cached)
@@ -443,7 +443,7 @@ export default class IconFixExtension extends Extension {
         }
         const shown = path ? new Gio.FileIcon({file: Gio.File.new_for_path(path)}) : icon;
         const ours = path || this._index.owner.has(app.get_id()) || this._index.windows.has(app.get_id()) || this._placed.has(app);
-        const gicon = shown && ours ? this._round(shown) : shown;
+        const gicon = shown && ours ? this._shownIcon(shown) : shown;
         const result = gicon && gicon !== icon ? {gicon} : null;
         if (result)
             log.debug(`${app.get_id()}: its icon ${icon?.to_string() ?? '(none)'} shown as ${gicon.to_string()}`);
@@ -463,18 +463,28 @@ export default class IconFixExtension extends Extension {
         }
     }
 
-    // The icon with rounded corners if it is a square (lib/shape.js), else
-    // the icon itself.
-    _round(gicon) {
-        if (!(this._radius > 0) || !gicon)
-            return gicon;
-        let path = null;
-        if (gicon instanceof Gio.FileIcon)
-            path = gicon.get_file().get_path();
-        else if (gicon instanceof Gio.ThemedIcon)
+    // An icon as Icon Fix shows it: rounded if it is a square (lib/shape.js),
+    // and an icon file by a name made from its content (lib/util.js
+    // copyByContent()): the Shell keeps the picture of a file by its path,
+    // so a new picture saved over a game's icon would never show.
+    _shownIcon(gicon) {
+        const isFile = gicon instanceof Gio.FileIcon;
+        let path = isFile ? gicon.get_file().get_path() : null;
+        if (!path && this._radius > 0 && gicon instanceof Gio.ThemedIcon)
             path = this._iconTheme.lookup_by_gicon(gicon, ROUND_LOOKUP_SIZE, 0)?.get_filename() ?? null;
-        const rounded = path ? roundedIcon(path, this._radius) : path;
-        return rounded && rounded !== path ? new Gio.FileIcon({file: Gio.File.new_for_path(rounded)}) : gicon;
+        if (!path)
+            return gicon;
+        const fileIcon = file => new Gio.FileIcon({file: Gio.File.new_for_path(file)});
+        // A rounded copy is named after its picture already.
+        const rounded = this._radius > 0 ? roundedIcon(path, this._radius) : path;
+        if (rounded !== path)
+            return fileIcon(rounded);
+        // A theme's icon the theme keeps up to date; Icon Fix's own icons
+        // are named after their picture.
+        if (!isFile || path.startsWith(`${cacheDir()}/`))
+            return gicon;
+        const copy = copyByContent(path, 'icons');
+        return copy ? fileIcon(copy) : gicon;
     }
 
     _iconShown(icon) {
@@ -528,7 +538,7 @@ export default class IconFixExtension extends Extension {
         }
         if (!gicon && !found.name)
             return null;
-        gicon = this._round(gicon);
+        gicon = this._shownIcon(gicon);
         return {gicon, name: found.name ?? null, tag: `${tag}\n${found.name}\n${gicon?.to_string()}`};
     }
 

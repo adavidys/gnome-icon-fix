@@ -142,6 +142,11 @@ export class StampCache {
         this._entries.set(path, {stamp, value});
         return value;
     }
+
+    // Reads it again next time.
+    forget(path) {
+        this._entries.delete(path);
+    }
 }
 
 // Lowercased, since paths taken from a Wine argv don't keep the real case.
@@ -245,4 +250,38 @@ export function findSandboxedIcon(name, first = []) {
         }
     }
     return null;
+}
+
+// An image file copied under a name made from its content
+// (~/.cache/icon-fix/<folder>/<sha1>.<ext>): the Shell keeps the pictures
+// of icon files by their path and never looks at a file again, so an icon
+// changed in place (a new picture saved over a game's icon) shows only
+// under a new name. Also keeps an icon whose file goes away (an AppImage's
+// mount). Its path, or null if it can't be read or written.
+const copies = new Map();
+
+export function copyByContent(path, folder) {
+    if (!copies.has(folder))
+        copies.set(folder, new StampCache(file => writeCopy(file, folder)));
+    const cache = copies.get(folder);
+    // A copy removed since (the cache cleaned): made again.
+    const out = cache.get(path);
+    if (out && !exists(out))
+        cache.forget(path);
+    return out && exists(out) ? out : cache.get(path);
+}
+
+function writeCopy(path, folder) {
+    const bytes = GLib.file_get_contents(path)[1];
+    // A file without an extension (an AppImage's .DirIcon): an SVG is told
+    // by its first bytes.
+    const ext = path.match(/\.(png|jpe?g|svgz?|xpm|ico|webp)$/i)?.[1].toLowerCase() ??
+        (/^\s*(<\?xml|<svg)/.test(decoder.decode(bytes.slice(0, 64))) ? 'svg' : 'png');
+    const dir = cacheDir(folder);
+    const out = `${dir}/${GLib.compute_checksum_for_bytes(GLib.ChecksumType.SHA1, bytes)}.${ext}`;
+    if (!exists(out)) {
+        GLib.mkdir_with_parents(dir, 0o755);
+        GLib.file_set_contents(out, bytes);
+    }
+    return out;
 }
