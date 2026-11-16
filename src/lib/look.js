@@ -26,3 +26,31 @@ export function pick(order, candidates) {
         .find(k => candidates[k] !== null && candidates[k] !== undefined);
     return kind ? {kind, value: candidates[kind]} : {kind: 'default', value: null};
 }
+
+// Characters that draw nothing: zero-width spaces and joiners, word
+// joiners, byte order marks, soft hyphens, bidi controls. Games put them in
+// their window titles (THE FINALS: "​TH​﻿﻿E F​IN…") so tools can't read them.
+const INVISIBLE = /[­᠎​-‏‪-‮⁠-⁤⁦-⁩﻿]/g;
+
+// A window title as it reads: without invisible characters, its spaces
+// collapsed.
+export function cleanTitle(title) {
+    return (title ?? '').replace(INVISIBLE, '').replace(/\s+/g, ' ').trim();
+}
+
+// Letters and digits only, lowercased: "osu!lazer" -> "osulazer".
+function letters(str) {
+    return str.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+// What a window Icon Fix placed is called in the window switcher, the
+// overview and window lists, so that they agree with the dock: the app's
+// name when the title says nothing more ("osu!" for osu!lazer, "THE
+// FINALS" with hidden characters), else the title, cleaned (a document's
+// name, a level...).
+export function shownTitle(title, name) {
+    const clean = cleanTitle(title);
+    if (!name)
+        return clean;
+    return !letters(clean) || letters(name).includes(letters(clean)) ? name : clean;
+}

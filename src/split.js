@@ -270,6 +270,16 @@ export class WindowSplitter {
         return this._gnomeApp(win);
     }
 
+    // Whether a window was moved away from the app GNOME gave it.
+    moved(win) {
+        return this._moved.has(win);
+    }
+
+    // The windows moved to app.
+    windowsOf(app) {
+        return [...this._moved].filter(entry => entry[1].app === app).map(entry => entry[0]);
+    }
+
     // Whether app has windows moved to it.
     hosts(app) {
         return [...this._moved.values()].some(m => m.app === app);

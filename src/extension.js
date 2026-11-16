@@ -9,6 +9,8 @@
 
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import GObject from 'gi://GObject';
+import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
@@ -18,7 +20,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Tracer, clearTrace} from './debug/trace.js';
 import {AppIndex, parseExec, tryCall} from './lib/appindex.js';
 import * as log from './lib/log.js';
-import {pick} from './lib/look.js';
+import {pick, shownTitle} from './lib/look.js';
 import {forgetBundles} from './lib/bundle.js';
 import {leavesSandbox, matchTitle, matchWindow} from './lib/matcher.js';
 import {forgetRead} from './lib/peicon.js';
@@ -286,11 +288,78 @@ export default class IconFixExtension extends Extension {
                 return found?.name ?? original.call(this);
             };
         });
+
+        // Window titles, for every part of the Shell (and other
+        // extensions) showing them next to the app's name: the window
+        // switcher, the overview, window lists. Icon Fix itself reads the
+        // real one (_rawTitle()).
+        const winProto = Meta.Window.prototype;
+        this._injections.overrideMethod(winProto, 'get_title', original => {
+            ext._rawTitle = win => original.call(win);
+            return function () {
+                return ext._shownTitle(this, original.call(this));
+            };
+        });
+        // The title property too, which GJS defines again on each kind of
+        // window (Wayland, X11), found as windows of each kind come.
+        this._titleProperties = new Map();
+        this._patchTitle(winProto);
+        for (const actor of global.get_window_actors())
+            this._patchTitle(actor.meta_window);
+    }
+
+    // The title property on a window's prototype and those it inherits
+    // from: prototype -> its own, to put back in _unpatch().
+    _patchTitle(object) {
+        if (!this._titleProperties)
+            return;
+        const ext = this;
+        for (let proto = object; proto && proto !== GObject.Object.prototype; proto = Object.getPrototypeOf(proto)) {
+            const own = Object.getOwnPropertyDescriptor(proto, 'title');
+            if (!own?.get || !own.configurable || this._titleProperties.has(proto))
+                continue;
+            this._titleProperties.set(proto, own);
+            Object.defineProperty(proto, 'title', {
+                ...own,
+                get() {
+                    return ext._shownTitle(this, own.get.call(this));
+                },
+            });
+        }
+    }
+
+    // What a window's title shows (lib/look.js shownTitle()): for a window
+    // Icon Fix placed, one that agrees with its app's name; any other's as
+    // it is.
+    _shownTitle(win, title) {
+        if (!this._index || this._inTitle)
+            return title;
+        this._inTitle = true;
+        try {
+            const app = this._tracker.get_window_app(win);
+            const placed = app && (app.is_window_backed() ? !!this._cache.get(app)?.result : this._splitter?.moved(win));
+            return placed ? shownTitle(title, app.get_name()) : title;
+        } finally {
+            this._inTitle = false;
+        }
+    }
+
+    // Tells whatever shows these apps' windows that their titles changed.
+    _notifyTitles(apps) {
+        for (const app of apps) {
+            for (const win of Shell.App.prototype.get_windows.call(app))
+                win.notify('title');
+            for (const win of this._splitter?.windowsOf(app) ?? [])
+                win.notify('title');
+        }
     }
 
     _unpatch() {
         this._injections?.clear();
         this._injections = null;
+        for (const [proto, own] of this._titleProperties ?? [])
+            Object.defineProperty(proto, 'title', own);
+        this._titleProperties = null;
     }
 
     // Returns {app: Shell.App} or {gicon: Gio.Icon | null, name} for a
@@ -310,7 +379,7 @@ export default class IconFixExtension extends Extension {
 
         const pid = win.get_pid();
         const key = `${win.get_wm_class()}\n${pid}`;
-        const title = win.get_title();
+        const title = this._rawTitle(win);
         if (cached?.key === key && cached.title === title)
             return cached.result;
 
@@ -530,7 +599,7 @@ export default class IconFixExtension extends Extension {
         // _choose() takes them; the rest is listed as what could have been
         // used. A window in a sandbox isn't matched by its title
         // (_sandboxedApp()): that could be another launcher's shortcut.
-        const title = primary || inSandbox ? null : matchTitle(this._index, win.get_title(), launcher);
+        const title = primary || inSandbox ? null : matchTitle(this._index, this._rawTitle(win), launcher);
         const headId = primary?.id ?? title?.id ?? null;
         const entryApp = headId ? this._appSystem.lookup_app(headId) : null;
         const look = this._choose(entryApp, fallbacks, app);
@@ -597,7 +666,7 @@ export default class IconFixExtension extends Extension {
         const entryApp = accepted ? this._appSystem.lookup_app(accepted.id) : null;
         if (entryApp === host || (!entryApp && !launcher))
             return null;
-        log.debug(`sandboxed window "${win.get_title()}" (${win.get_wm_class()}, ${sandbox}): ` +
+        log.debug(`sandboxed window "${this._rawTitle(win)}" (${win.get_wm_class()}, ${sandbox}): ` +
             `${entryApp ? `entry ${accepted.id} (${accepted.by})` : `no entry, fallbacks ${JSON.stringify(fallbacks)}`}`);
         this._place(entryApp);
         const look = this._choose(entryApp, fallbacks, host);
@@ -630,6 +699,7 @@ export default class IconFixExtension extends Extension {
         if (this._windows.has(win))
             return;
         this._windows.add(win);
+        this._patchTitle(win);
         const recheck = () => {
             const app = this._tracker.get_window_app(win);
             if (app?.is_window_backed())
@@ -654,15 +724,27 @@ export default class IconFixExtension extends Extension {
 
     // notify::icon alone is not enough: dash-to-dock only listens to it for
     // its location icons, so also rebuild every BaseIcon showing these apps.
+    // Names are only read when an icon is made (the dock's tooltip, the
+    // label under an icon): set them again too. A game that starts through
+    // a launcher of its own (THE FINALS: Discovery.exe, "Embark Game
+    // Launcher", then Discovery-d.exe) changes name once its own window is
+    // up, after the dock made its icon.
     _refreshIcons(apps) {
         if (!apps.size)
             return;
         for (const app of apps)
             app.notify('icon');
 
+        this._notifyTitles(apps);
         const walk = actor => {
-            if (apps.has(actor.app) && typeof actor.icon?.update === 'function')
-                actor.icon.update();
+            if (apps.has(actor.app)) {
+                if (typeof actor.icon?.update === 'function')
+                    actor.icon.update();
+                actor.icon?.label?.set_text?.(actor.app.get_name());
+            }
+            // The dash's item around an app icon carries the tooltip.
+            if (apps.has(actor.child?.app) && typeof actor.setLabelText === 'function')
+                actor.setLabelText(actor.child.app.get_name());
             for (const child of actor.get_children())
                 walk(child);
         };
