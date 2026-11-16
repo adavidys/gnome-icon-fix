@@ -105,6 +105,7 @@ export default class IconFixPreferences extends ExtensionPreferences {
         general.add(this._orderGroup(settings, 'icon-order', 'Icons', ICON_KINDS));
         general.add(this._orderGroup(settings, 'name-order', 'Names', NAME_KINDS));
         general.add(this._appearanceGroup(settings));
+        general.add(this._blacklistGroup(window, settings));
 
         const flatpak = new Adw.PreferencesPage({
             title: 'Flatpak',
@@ -277,6 +278,98 @@ export default class IconFixPreferences extends ExtensionPreferences {
         };
         settings.connect(`changed::${key}`, fill);
         fill();
+        return group;
+    }
+
+    // Applications Icon Fix must leave completely unchanged.
+    _blacklistGroup(window, settings) {
+        const group = new Adw.PreferencesGroup({
+            title: 'Excluded applications',
+            description: 'These applications keep their original GNOME icons, names and window assignments. Enter an exact .desktop ID.',
+        });
+
+        const reset = new Gtk.Button({
+            icon_name: 'edit-undo-symbolic',
+            tooltip_text: 'Clear blacklist',
+            valign: Gtk.Align.CENTER,
+            css_classes: ['flat'],
+        });
+        reset.connect('clicked', () => settings.reset('blacklist'));
+        group.set_header_suffix(reset);
+
+        const entry = new Gtk.Entry({
+            placeholder_text: 'org.gnome.Nautilus.desktop',
+            hexpand: true,
+            valign: Gtk.Align.CENTER,
+        });
+        const add = new Gtk.Button({
+            label: 'Add',
+            valign: Gtk.Align.CENTER,
+            css_classes: ['suggested-action'],
+        });
+        const inputRow = new Adw.ActionRow({
+            title: 'Desktop application ID',
+            activatable_widget: entry,
+        });
+        inputRow.add_suffix(entry);
+        inputRow.add_suffix(add);
+        group.add(inputRow);
+
+        const list = new Gtk.ListBox({
+            selection_mode: Gtk.SelectionMode.NONE,
+            css_classes: ['boxed-list'],
+        });
+        group.add(list);
+
+        const refresh = () => {
+            const ids = [...new Set(settings.get_strv('blacklist'))].sort();
+            list.remove_all();
+
+            for (const id of ids) {
+                const row = new Adw.ActionRow({
+                    title: id,
+                    subtitle: 'Excluded from Icon Fix',
+                });
+                const remove = new Gtk.Button({
+                    icon_name: 'list-remove-symbolic',
+                    tooltip_text: 'Remove from blacklist',
+                    valign: Gtk.Align.CENTER,
+                    css_classes: ['flat'],
+                });
+                remove.connect('clicked', () => {
+                    settings.set_strv('blacklist',
+                        settings.get_strv('blacklist').filter(item => item !== id));
+                });
+                row.add_suffix(remove);
+                list.append(row);
+            }
+
+            list.visible = ids.length > 0;
+            reset.sensitive = ids.length > 0;
+        };
+
+        const addId = () => {
+            const id = entry.text.trim();
+            if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*\.desktop$/.test(id)) {
+                window.add_toast(new Adw.Toast({title: 'Enter a valid .desktop ID'}));
+                return;
+            }
+
+            const ids = settings.get_strv('blacklist');
+            if (ids.includes(id)) {
+                window.add_toast(new Adw.Toast({title: 'Application is already excluded'}));
+                return;
+            }
+
+            settings.set_strv('blacklist', [...ids, id]);
+            entry.text = '';
+        };
+
+        add.connect('clicked', addId);
+        entry.connect('activate', addId);
+        settings.connect('changed::blacklist', refresh);
+        refresh();
+
         return group;
     }
 

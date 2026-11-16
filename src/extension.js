@@ -60,6 +60,8 @@ export default class IconFixExtension extends Extension {
             'changed::icon-order', () => this._readOrders(true),
             'changed::name-order', () => this._readOrders(true),
             'changed::corner-radius', () => this._readOrders(true), this);
+        this._settings.connectObject('changed::blacklist',
+            () => this._queueReindex(), this);
         this._looks = new WeakMap();
         // Entries Icon Fix found for windows: their icons are its to round
         // too (_entryIcon()).
@@ -202,6 +204,13 @@ export default class IconFixExtension extends Extension {
     }
 
     // again: the order changed, every window is looked at again.
+    _isBlacklisted(appOrId) {
+        const id = typeof appOrId === 'string'
+            ? appOrId
+            : appOrId?.get_id?.();
+        return !!id && this._settings.get_strv('blacklist').includes(id);
+    }
+
     _readOrders(again = false) {
         this._iconOrder = this._settings.get_strv('icon-order');
         this._nameOrder = this._settings.get_strv('name-order');
@@ -366,7 +375,7 @@ export default class IconFixExtension extends Extension {
     // window-backed app we could identify, {gicon} for an entry whose icon
     // we found elsewhere, null otherwise.
     _resolve(app) {
-        if (!this._index)
+        if (!this._index || !app || this._isBlacklisted(app))
             return null;
         if (!app.is_window_backed())
             return this._movedLook(app) ?? this._entryIcon(app);
@@ -397,6 +406,15 @@ export default class IconFixExtension extends Extension {
         // Its entry (by the sources, else by the title) when its icon and
         // name are both to come from .desktop; else what the order says.
         const entry = found.primary ?? this._realize(matchTitle(this._index, title, found.launcher));
+        if (this._isBlacklisted(entry?.id)) {
+            this._cache.set(app, {
+                key, primary: found.primary, fallbacks: found.fallbacks,
+                launcher: found.launcher, title, result: null, moveTo: null,
+            });
+            if (cached?.result)
+                this._queueNotify(app);
+            return null;
+        }
         this._place(entry?.app);
         const look = this._choose(entry?.app ?? null, found.fallbacks, app);
         let result = look;
@@ -424,6 +442,8 @@ export default class IconFixExtension extends Extension {
     // The icons of Icon Fix's entries (a launcher's game shortcuts, entries
     // it found for windows) are rounded when square (_shownIcon()).
     _entryIcon(app) {
+        if (!app || this._isBlacklisted(app))
+            return null;
         const cached = this._cache.get(app);
         if (cached)
             return cached.result;
@@ -454,7 +474,7 @@ export default class IconFixExtension extends Extension {
     // An entry Icon Fix found for a window: from now on its icon is
     // rounded like the ones Icon Fix finds itself.
     _place(app) {
-        if (!app || this._placed.has(app))
+        if (!app || this._isBlacklisted(app) || this._placed.has(app))
             return;
         this._placed.add(app);
         if (this._radius > 0) {
@@ -587,7 +607,7 @@ export default class IconFixExtension extends Extension {
     // window, with where it came from and whether it is the one shown:
     // [{source, kind, id?, name, icon, usesName, usesIcon, missing}].
     _explain(win, app, moved) {
-        if (!this._index || !app)
+        if (!this._index || !app || this._isBlacklisted(app))
             return [];
         const toString = gicon => gicon?.to_string() ?? null;
         // A desktop entry: only its icon can be replaced (_entryIcon()).
@@ -668,10 +688,12 @@ export default class IconFixExtension extends Extension {
     // of the same Flatpak. The launcher's own windows (no game id in their
     // environment) stay with the launcher.
     _sandboxedApp(win, splitter, host) {
-        if (!this._index)
+        if (!this._index || this._isBlacklisted(host))
             return null;
         const sandbox = win.get_sandboxed_app_id();
         const {primary, fallbacks, launcher} = this._match(win, true, this._allFallbacks);
+        if (this._isBlacklisted(primary?.id))
+            return null;
         const accepted = leavesSandbox(this._index, primary, launcher, sandbox) ? primary : null;
         const entryApp = accepted ? this._appSystem.lookup_app(accepted.id) : null;
         if (entryApp === host || (!entryApp && !launcher))

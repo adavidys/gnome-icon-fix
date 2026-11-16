@@ -27,6 +27,11 @@
       <summary>Corner radius of square icons, in percent of their side</summary>
       <description>Icons Icon Fix shows (and the icons of launchers' game shortcuts) that are plain squares, as icons taken from a Windows program, Steam's or an AppImage's often are, get their corners rounded by this much, like GNOME's own square icons (about 16). Icons with transparent corners keep their own shape. 0 leaves every icon as it is.</description>
     </key>
+    <key name="blacklist" type="as">
+      <default>[]</default>
+      <summary>Applications excluded from Icon Fix</summary>
+      <description>Exact .desktop application IDs that Icon Fix must leave unchanged.</description>
+    </key>
     <key name="debug-logging" type="b">
       <default>false</default>
       <summary>Write debug details to the system journal</summary>
