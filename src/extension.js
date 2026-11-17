@@ -26,7 +26,7 @@ import {leavesSandbox, matchTitle, matchWindow} from './lib/matcher.js';
 import {forgetRead} from './lib/peicon.js';
 import {readProcess} from './lib/process.js';
 import {forgetRounded, roundedIcon} from './lib/shape.js';
-import {cacheDir, copyByContent, findPixmap, findSandboxedIcon} from './lib/util.js';
+import {cacheDir, copyByContent, findPixmap, findSandboxedIcon, normalize} from './lib/util.js';
 import {MIRRORS} from './mirror/registry.js';
 import {createSources, envKeys} from './sources/registry.js';
 import {WindowSplitter} from './split.js';
@@ -555,9 +555,13 @@ export default class IconFixExtension extends Extension {
             desktop: entryApp ? this._entryIcon(entryApp)?.gicon ?? this._gnomeIcon(entryApp) : first(false, 'gicon'),
             exe: first(true, 'gicon'),
         });
+        const desktopName = entryApp ? this._gnomeName(entryApp) : first(false, 'name');
+        const exeName = first(true, 'name');
+        // The same name, as a file is named ("deadlock" for Deadlock): as the
+        // .desktop writes it.
         const name = pick(this._nameOrder, {
-            desktop: entryApp ? this._gnomeName(entryApp) : first(false, 'name'),
-            exe: first(true, 'name'),
+            desktop: desktopName,
+            exe: exeName && normalize(exeName) === normalize(desktopName) ? desktopName : exeName,
         });
         const tag = `${icon.kind}:${icon.value?.to_string()}\n${name.kind}:${name.value}`;
         return {
