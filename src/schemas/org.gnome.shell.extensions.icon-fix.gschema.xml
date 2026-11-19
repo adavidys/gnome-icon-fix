@@ -30,7 +30,12 @@
     <key name="blacklist" type="as">
       <default>[]</default>
       <summary>Applications excluded from Icon Fix</summary>
-      <description>Exact .desktop application IDs that Icon Fix must leave unchanged.</description>
+      <description>The .desktop ids (org.gnome.Nautilus.desktop; ".desktop" may be left out) of the apps Icon Fix leaves as GNOME has them: their icon and name stay GNOME's, and no window is moved to or from them.</description>
+    </key>
+    <key name="blacklist-wm-classes" type="as">
+      <default>[]</default>
+      <summary>Windows excluded from Icon Fix, by WM_CLASS</summary>
+      <description>Windows whose WM_CLASS class or instance (in any case) is one of these keep the app, icon and name GNOME gives them.</description>
     </key>
     <key name="debug-logging" type="b">
       <default>false</default>

@@ -49,6 +49,8 @@ export default class IconFixExtension extends Extension {
             () => log.setDebug(this._settings.get_boolean('debug-logging')), this);
 
         this._appSystem = Shell.AppSystem.get_default();
+        // App ids to draw anew after the next reindex (_readExclusions()).
+        this._redraw = new Set();
         this._tracker = Shell.WindowTracker.get_default();
         this._iconTheme = new St.IconTheme();
         this._cache = new WeakMap();
@@ -60,8 +62,11 @@ export default class IconFixExtension extends Extension {
             'changed::icon-order', () => this._readOrders(true),
             'changed::name-order', () => this._readOrders(true),
             'changed::corner-radius', () => this._readOrders(true), this);
-        this._settings.connectObject('changed::blacklist',
-            () => this._queueReindex(), this);
+        // What the user excluded (preferences, Exclusions).
+        this._readExclusions();
+        this._settings.connectObject(
+            'changed::blacklist', () => this._readExclusions(true),
+            'changed::blacklist-wm-classes', () => this._readExclusions(true), this);
         this._looks = new WeakMap();
         // Entries Icon Fix found for windows: their icons are its to round
         // too (_entryIcon()).
@@ -203,14 +208,36 @@ export default class IconFixExtension extends Extension {
         }
     }
 
-    // again: the order changed, every window is looked at again.
-    _isBlacklisted(appOrId) {
-        const id = typeof appOrId === 'string'
-            ? appOrId
-            : appOrId?.get_id?.();
-        return !!id && this._settings.get_strv('blacklist').includes(id);
+    // The apps (by .desktop id, with or without ".desktop") and the
+    // windows (by WM_CLASS, its class or instance, in any case) Icon Fix
+    // leaves as GNOME has them. again: they changed; every window is looked
+    // at again, and whatever showed an app that was excluded or let go is
+    // drawn anew.
+    _readExclusions(again = false) {
+        const before = [...this._excludedApps ?? []];
+        this._excludedApps = new Set(this._settings.get_strv('blacklist').map(id => id.trim())
+            .filter(Boolean).map(id => id.endsWith('.desktop') ? id : `${id}.desktop`));
+        this._excludedClasses = new Set(this._settings.get_strv('blacklist-wm-classes')
+            .map(c => c.trim().toLowerCase()).filter(Boolean));
+        if (again) {
+            // A window excluded by its class may show an entry's icon.
+            for (const id of [...before, ...this._excludedApps, ...this._appSystem.get_running().map(app => app.get_id())])
+                this._redraw.add(id);
+            this._queueReindex();
+        }
     }
 
+    _isBlacklisted(appOrId) {
+        const id = typeof appOrId === 'string' ? appOrId : appOrId?.get_id?.();
+        return !!id && this._excludedApps.has(id);
+    }
+
+    _isExcludedWindow(win) {
+        return this._excludedClasses.size > 0 &&
+            [win.get_wm_class(), win.get_wm_class_instance()].some(c => c && this._excludedClasses.has(c.toLowerCase()));
+    }
+
+    // again: the order changed, every window is looked at again.
     _readOrders(again = false) {
         this._iconOrder = this._settings.get_strv('icon-order');
         this._nameOrder = this._settings.get_strv('name-order');
@@ -232,7 +259,8 @@ export default class IconFixExtension extends Extension {
             this._cache = new WeakMap();
             this._looks = new WeakMap();
             this._splitter.recheckAll();
-            this._refreshRunning();
+            this._refreshRunning([...this._redraw].map(id => this._appSystem.lookup_app(id)));
+            this._redraw.clear();
             return GLib.SOURCE_REMOVE;
         });
     }
@@ -377,14 +405,23 @@ export default class IconFixExtension extends Extension {
     _resolve(app) {
         if (!this._index || !app || this._isBlacklisted(app))
             return null;
-        if (!app.is_window_backed())
+        if (!app.is_window_backed()) {
+            if (Shell.App.prototype.get_windows.call(app).some(w => this._isExcludedWindow(w)))
+                return null;
             return this._movedLook(app) ?? this._entryIcon(app);
+        }
 
         const cached = this._cache.get(app);
         // Its own window, also once moved to the game's entry (split.js).
         const win = Shell.App.prototype.get_windows.call(app)[0];
         if (!win)
             return cached?.result ?? null;
+        if (this._isExcludedWindow(win)) {
+            this._cache.set(app, {result: null, moveTo: null});
+            if (cached?.result)
+                this._queueNotify(app);
+            return null;
+        }
 
         const pid = win.get_pid();
         const key = `${win.get_wm_class()}\n${pid}`;
@@ -406,7 +443,8 @@ export default class IconFixExtension extends Extension {
         // Its entry (by the sources, else by the title) when its icon and
         // name are both to come from .desktop; else what the order says.
         const entry = found.primary ?? this._realize(matchTitle(this._index, title, found.launcher));
-        if (this._isBlacklisted(entry?.id)) {
+        // _realize() gives {app, tag}: the entry's id is its app's.
+        if (this._isBlacklisted(entry?.app)) {
             this._cache.set(app, {
                 key, primary: found.primary, fallbacks: found.fallbacks,
                 launcher: found.launcher, title, result: null, moveTo: null,
@@ -614,7 +652,7 @@ export default class IconFixExtension extends Extension {
     // window, with where it came from and whether it is the one shown:
     // [{source, kind, id?, name, icon, usesName, usesIcon, missing}].
     _explain(win, app, moved) {
-        if (!this._index || !app || this._isBlacklisted(app))
+        if (!this._index || !app || this._isBlacklisted(app) || this._isExcludedWindow(win))
             return [];
         const toString = gicon => gicon?.to_string() ?? null;
         // A desktop entry: only its icon can be replaced (_entryIcon()).
@@ -639,6 +677,8 @@ export default class IconFixExtension extends Extension {
         const title = primary || inSandbox ? null : matchTitle(this._index, this._rawTitle(win), launcher);
         const headId = primary?.id ?? title?.id ?? null;
         const entryApp = headId ? this._appSystem.lookup_app(headId) : null;
+        if (this._isBlacklisted(headId))
+            return [];
         const look = this._choose(entryApp, fallbacks, app, inSandbox ? null : this._rawTitle(win));
         // Nothing is used with GNOME's own icon and name both first, nor for
         // a sandboxed window without an entry unless a launcher started it
@@ -700,7 +740,7 @@ export default class IconFixExtension extends Extension {
     // of the same Flatpak. The launcher's own windows (no game id in their
     // environment) stay with the launcher.
     _sandboxedApp(win, splitter, host) {
-        if (!this._index || this._isBlacklisted(host))
+        if (!this._index || this._isBlacklisted(host) || this._isExcludedWindow(win))
             return null;
         const sandbox = win.get_sandboxed_app_id();
         const {primary, fallbacks, launcher} = this._match(win, true, this._allFallbacks);
@@ -761,9 +801,11 @@ export default class IconFixExtension extends Extension {
             }, this);
     }
 
-    _refreshRunning() {
-        this._refreshIcons(new Set(
-            this._appSystem.get_running().filter(app => app.is_window_backed() || this._resolve(app))));
+    // also: other apps to draw anew (GNOME's own look given back).
+    _refreshRunning(also = []) {
+        this._refreshIcons(new Set([
+            ...this._appSystem.get_running().filter(app => app.is_window_backed() || this._resolve(app)),
+            ...also.filter(Boolean)]));
     }
 
     // notify::icon alone is not enough: dash-to-dock only listens to it for

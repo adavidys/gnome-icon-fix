@@ -77,6 +77,27 @@ class LogReader {
     }
 }
 
+// The windows open now, as the trace last saw them (the trace runs while
+// the preferences are open): their latest records, by title.
+export function openWindows() {
+    const reader = new LogReader();
+    reader.update();
+    const latest = new Map();
+    const closed = new Set();
+    let openNow = null;
+    for (const r of reader.records) {
+        if (r.kind === 'window')
+            latest.set(r.window.id, r);
+        else if (r.kind === 'window-closed')
+            closed.add(r.window);
+        else if (r.kind === 'open-windows')
+            openNow = new Set(r.windows);
+    }
+    return [...latest.values()]
+        .filter(r => openNow ? openNow.has(r.window.id) : !closed.has(r.window.id))
+        .sort((a, b) => (a.window.title ?? '').localeCompare(b.window.title ?? ''));
+}
+
 function time(t) {
     return GLib.DateTime.new_from_unix_local(Math.floor(t / 1000)).format('%H:%M:%S');
 }

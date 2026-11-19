@@ -61,6 +61,15 @@ The dock, Alt+Tab and the overview always show the same name. A game that rename
 
 Icons taken from a game's `.exe`, Steam's library and many AppImages are plain squares, which look out of place next to GNOME's rounded icons. Under **Appearance** in the **General** tab, **Round square icons** (on by default) rounds their corners like GNOME's own square app icons, by 16 % of the icon's side; **Corner radius** sets how much (1–50 %). It applies to the icons Icon Fix shows for windows and to the icons of launchers' game shortcuts. Icons with transparent corners already have a shape of their own and stay as they are. The rounded copies are kept in `~/.cache/icon-fix/rounded`.
 
+### Exclusions
+
+The **Exclusions** tab lists what Icon Fix leaves exactly as GNOME has it: its icon, its name and the app its windows belong to.
+
+- **Applications**, by their `.desktop` id: pick one with **Choose…** or type its id (`org.gnome.Nautilus.desktop`; `.desktop` may be left out). No window is moved to such an app or away from it either.
+- **Windows**, by their `WM_CLASS`, class or instance, in any case: pick one of the open windows with **Open windows…** or type it (`steam_app_1091500`). The Debug tab shows every open window's `WM_CLASS`.
+
+Changes apply at once, without logging out.
+
 ### Steam from Flathub
 
 Flatpak Steam (`com.valvesoftware.Steam`) writes its game shortcuts inside its sandbox, where GNOME never looks, and their `Exec=steam …` doesn't exist on the host. So installed games are missing from search and the app grid.
@@ -149,6 +158,7 @@ src/
 ├── split.js            # moves game windows out of Flatpak launchers' apps
 ├── debug/              # the Debug tab: trace.js (in the Shell), page.js (preferences)
 ├── prefs.js            # preferences window
+├── exclusions.js       # the Exclusions tab of the preferences
 ├── lib/                # no Shell imports: runs and tests with plain gjs
 │   ├── appindex.js     # lookup tables over the installed .desktop entries
 │   ├── bundle.js       # AppImages and Snaps: the entry and icons they carry

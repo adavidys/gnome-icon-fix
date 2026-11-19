@@ -33,4 +33,8 @@ test('look: window titles that agree with the dock', () => {
     eq(titleName('FPS: 60 | THE FINALS', 'THE FINALS'), null, 'the name after more');
     eq(titleName('\u200B ', 'Game'), null, 'nothing to read');
     eq(titleName('Something', null), null, 'no name');
+    eq(titleName('Z:\\home\\me\\The Last of Us Part I\\launcher.exe', 'The Last of Us™ Part I'), null, 'a Windows path');
+    eq(titleName('C:\\windows\\system32\\cmd.exe', 'The Last of Us™ Part I'), null, 'Wine\'s console');
+    eq(titleName('/opt/game/run.sh', 'Game'), null, 'a path');
+    eq(titleName('setup.exe', 'Game'), null, 'a program');
 });

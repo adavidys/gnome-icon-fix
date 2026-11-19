@@ -49,9 +49,13 @@ function letters(str) {
 // ("The Last of Us™ Part I", a few seconds later "Одни из нас™: Часть I").
 // null when the title is the name, a part of it ("osu!" for osu!lazer) or
 // holds it among other things (a resolution, a renderer, an FPS counter:
-// "Baldur's Gate 3 (1920x1080) - (Vulkan)"), and without a name.
+// "Baldur's Gate 3 (1920x1080) - (Vulkan)"), a program's path (Wine names
+// a window it has no title for after it: "Z:\...\launcher.exe",
+// "C:\windows\system32\cmd.exe"), and without a name.
 export function titleName(title, name) {
     const clean = cleanTitle(title);
+    if (/[\\/]|\.(exe|bat|cmd|com|lnk)$/i.test(clean))
+        return null;
     const own = letters(clean);
     const known = letters(name);
     return own && known && !known.includes(own) && !own.includes(known) ? clean : null;

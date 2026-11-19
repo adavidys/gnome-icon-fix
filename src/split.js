@@ -168,6 +168,11 @@ export class WindowSplitter {
 
         global.display.connectObject('window-created',
             (_display, win) => this._watch(win), this);
+        // GNOME tracks a window anew when it learns more about it (a GTK
+        // app tells its id after its window is up) and makes up a new app
+        // for it each time: that one has to give the window up too.
+        this._recheckId = 0;
+        this._tracker.connectObject('tracked-windows-changed', () => this._queueRecheck(), this);
         for (const actor of global.get_window_actors())
             this._watch(actor.meta_window);
     }
@@ -175,7 +180,10 @@ export class WindowSplitter {
     destroy() {
         if (this._refreshId)
             GLib.source_remove(this._refreshId);
+        if (this._recheckId)
+            GLib.source_remove(this._recheckId);
         global.display.disconnectObject(this);
+        this._tracker.disconnectObject(this);
         for (const win of this._moved.keys())
             win.disconnectObject(this);
         this._injections.clear();
@@ -215,6 +223,18 @@ export class WindowSplitter {
     recheckAll() {
         for (const actor of global.get_window_actors())
             this._check(actor.meta_window);
+    }
+
+    // Once the tracker is done (it signals from within its bookkeeping).
+    _queueRecheck() {
+        if (this._recheckId)
+            return;
+        this._recheckId = GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+            this._recheckId = 0;
+            for (const win of [...this._moved.keys()])
+                this._check(win);
+            return GLib.SOURCE_REMOVE;
+        });
     }
 
     _watch(win) {
