@@ -1,5 +1,5 @@
 import {eq, test} from './harness.js';
-import {KINDS, cleanTitle, normalizeOrder, pick, shownTitle} from '../src/lib/look.js';
+import {KINDS, cleanTitle, normalizeOrder, pick, shownTitle, titleName} from '../src/lib/look.js';
 
 test('look: orders as stored, repaired', () => {
     eq(normalizeOrder(KINDS), ['desktop', 'exe', 'default']);
@@ -20,13 +20,17 @@ test('look: the first kind that has something', () => {
 });
 
 test('look: window titles that agree with the dock', () => {
-    eq(cleanTitle('​TH​﻿﻿​​​E F​​IN​﻿A​​L﻿S'), 'THE FINALS');
+    eq(cleanTitle('\u200BTH\u200B\uFEFF\uFEFF\u200B\u200B\u200BE F\u200B\u200BIN\u200B\uFEFFA\u200B\u200BL\uFEFFS'), 'THE FINALS');
     eq(cleanTitle('  a \n b  '), 'a b');
     eq(cleanTitle(null), '');
-    eq(shownTitle('osu!', 'osu!lazer'), 'osu!lazer', 'says nothing more than the name');
-    eq(shownTitle('​THE FIN﻿ALS', 'THE FINALS'), 'THE FINALS');
-    eq(shownTitle('', 'Game'), 'Game', 'no title');
-    eq(shownTitle('!!!', 'Game'), 'Game', 'no letters');
-    eq(shownTitle('Save 3 - Hollow​ Knight', 'Hollow Knight'), 'Save 3 - Hollow Knight', 'more than the name: kept, cleaned');
-    eq(shownTitle('report.odt', null), 'report.odt');
+    eq(shownTitle('osu!', 'osu!lazer'), 'osu!lazer');
+    eq(shownTitle("Baldur's Gate 3 (1920x1080) - (Vulkan) - (6 + 6 WT)", "Baldur's Gate 3"), "Baldur's Gate 3", 'always the app\'s name');
+    eq(shownTitle('\u200BTHE FIN\uFEFFALS', null), 'THE FINALS', 'no name: the title, cleaned');
+    eq(titleName('Одни  из нас™: Часть I', 'The Last of Us™ Part I'), 'Одни из нас™: Часть I', 'another name: the title');
+    eq(titleName('The Last of Us™ Part I', 'The Last of Us Part I'), null, 'the name');
+    eq(titleName('osu!', 'osu!lazer'), null, 'a part of the name');
+    eq(titleName("Baldur's Gate 3 (1920x1080) - (Vulkan) - (6 + 6 WT)", "Baldur's Gate 3"), null, 'the name and more');
+    eq(titleName('FPS: 60 | THE FINALS', 'THE FINALS'), null, 'the name after more');
+    eq(titleName('\u200B ', 'Game'), null, 'nothing to read');
+    eq(titleName('Something', null), null, 'no name');
 });

@@ -40,7 +40,6 @@ class Reader {
 // read, allocate or loop without bound.
 const MAX_ENTRIES = 4096;
 // type -> name -> language
-const MAX_DEPTH = 3;
 const MAX_GROUP_BYTES = 64 << 10;
 const MAX_ICON_BYTES = 4 << 20;
 const MAX_VERSION_BYTES = 256 << 10;
@@ -85,26 +84,27 @@ class Resources {
         return list;
     }
 
-    // Every resource of a type, first language only, not read yet:
-    // [{id, offset, size}].
-    list(type) {
+    // Every resource of a type, not read yet: [{id, offset, size}]. Of
+    // each, its first language only, or every one (languages).
+    list(type, languages = false) {
         const typeEntry = this._entries(0).find(e => e.id === type && e.isDir);
         if (!typeEntry)
             return [];
         const found = [];
         for (const item of this._entries(typeEntry.offset)) {
-            let leaf = item;
-            // A directory pointing back at itself must not hang the Shell.
-            for (let depth = 2; leaf?.isDir; depth++)
-                leaf = depth < MAX_DEPTH ? this._entries(leaf.offset)[0] : null;
-            if (!leaf)
-                continue;
-            const data = this._bytes(leaf.offset, 8);
-            found.push({
-                id: item.id,
-                offset: data.getUint32(0, true) - this._rva,
-                size: data.getUint32(4, true),
-            });
+            const inLanguages = item.isDir ? this._entries(item.offset) : [item];
+            for (const language of languages ? inLanguages : inLanguages.slice(0, 1)) {
+                // Nothing lies below a language: a directory there (one
+                // pointing back at itself) is broken.
+                if (language.isDir)
+                    continue;
+                const data = this._bytes(language.offset, 8);
+                found.push({
+                    id: item.id,
+                    offset: data.getUint32(0, true) - this._rva,
+                    size: data.getUint32(4, true),
+                });
+            }
         }
         return found;
     }
@@ -248,20 +248,24 @@ function bestIcon(resources) {
     return null;
 }
 
-// The first of these strings the version info has (ProductName...). The
-// String blocks hold a UTF-16 key, padding to 32 bits, then the value.
+// The first of these strings the version info has (ProductName...), in
+// any of its versions: a program may carry one per language, the first
+// one empty (bg3.exe). The String blocks hold a UTF-16 key, padding to 32
+// bits, then the value.
 function versionString(resources, keys) {
-    const version = resources.read(resources.list(RT_VERSION)[0], MAX_VERSION_BYTES);
-    if (!version)
-        return null;
+    const versions = resources.list(RT_VERSION, true).map(entry => resources.read(entry, MAX_VERSION_BYTES)).filter(Boolean);
     for (const key of keys) {
-        const value = findString(version, key);
+        const value = versions.map(version => findString(version, key)).find(Boolean);
         if (value)
             return value;
     }
     return null;
 }
 
+// The value of key in the first String table that has one: a program may
+// have several (one per language), some of them empty (bg3.exe: " ", then
+// "Baldur's Gate 3"). A value ends at its first NUL; what follows is the
+// next block.
 function findString(version, key) {
     const needle = [...`${key}\0`].flatMap(c => [c.charCodeAt(0), 0]);
     // A String block starts with 3 words (lengths, type) before its key.
@@ -270,12 +274,26 @@ function findString(version, key) {
             continue;
         const valueLength = version[i - 4] | version[i - 3] << 8;
         const start = (i + needle.length + 3) & ~3;
-        const value = new TextDecoder('utf-16le').decode(
-            version.subarray(start, start + valueLength * 2)).replace(/\0+$/, '').trim();
-        return value || null;
+        const value = productName(new TextDecoder('utf-16le').decode(
+            version.subarray(start, start + valueLength * 2)).split('\0')[0]);
+        if (value)
+            return value;
     }
     return null;
 }
+
+// A name read from a program, if it is one: without control and invisible
+// characters, with a letter in it, and not just a file name (bg3.exe's
+// FileDescription is "bg3.exe").
+export function productName(value) {
+    const clean = (value ?? '').replace(/[\p{Cc}\p{Cf}]+/gu, ' ').replace(/\s+/g, ' ').trim();
+    return /\p{L}/u.test(clean) && !/\.(exe|dll|bin)$/i.test(clean) ? clean : null;
+}
+
+// What a program was found to hold, saved by an earlier session, is read
+// again when it was saved by an older Icon Fix: 2 reads every language of
+// the version info (names were garbled before).
+const SAVED_VERSION = 2;
 
 function cacheDir() {
     return GLib.build_filenamev([GLib.get_user_cache_dir(), 'icon-fix', 'exe-icons']);
@@ -309,7 +327,7 @@ export function exeInfo(path, dir = cacheDir()) {
     // Saved by an earlier session (in the cache only: a mirror's folder
     // holds only its icons): no need to open the program again.
     const saved = dir === cacheDir() ? readJson(found) : null;
-    if (saved && (!saved.icon || GLib.file_test(png, GLib.FileTest.EXISTS))) {
+    if (saved?.version === SAVED_VERSION && (!saved.icon || GLib.file_test(png, GLib.FileTest.EXISTS))) {
         const before = saved.program ? {icon: saved.icon ? png : null, name: saved.name} : null;
         known.set(`${dir}\n${path}`, {stamp, info: before});
         return before;
@@ -344,7 +362,7 @@ export function exeInfo(path, dir = cacheDir()) {
     if (dir === cacheDir()) {
         try {
             GLib.mkdir_with_parents(dir, 0o755);
-            GLib.file_set_contents(found, JSON.stringify({program: !!info, icon: !!info?.icon, name: info?.name ?? null}));
+            GLib.file_set_contents(found, JSON.stringify({version: SAVED_VERSION, program: !!info, icon: !!info?.icon, name: info?.name ?? null}));
         } catch (e) {
             log.debug(`can't save what ${path} holds: ${e}`);
         }

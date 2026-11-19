@@ -84,8 +84,11 @@ def version(strings):
     return out
 
 
-def resource_section(resources, rva, cycle=False, named=False, huge=False, bad_offset=0, many=False):
-    """resources: {type: [(id, data)]} -> bytes of a .rsrc section at rva.
+def resource_section(resources, rva, cycle=False, named=False, huge=False, bad_offset=0, many=False, flat=False):
+    """resources: {type: [(id, data)]} -> bytes of a .rsrc section at rva;
+    data may be a list: one per language.
+    flat: the first type's entries point at their data, without a
+    language directory.
     cycle: the first type's name directory points back at itself.
     named: add an entry with a name instead of an id.
     huge: every data entry claims 2 GiB.
@@ -114,34 +117,38 @@ def resource_section(resources, rva, cycle=False, named=False, huge=False, bad_o
         type_dir = cursor
         cursor += 16 + 8 * (len(items) + (1 if named and t == types[0] else 0))
         plan.append((t, type_dir, items))
+    langs = lambda data: data if isinstance(data, list) else [data]
     lang_dirs = {}
     for t, _, items in plan:
-        for item_id, _ in items:
+        for item_id, data in items:
             lang_dirs[(t, item_id)] = cursor
-            cursor += 16 + 8
+            cursor += 16 + 8 * len(langs(data))
     data_start = cursor
     entry_offset = {}
     for t, _, items in plan:
-        for item_id, _ in items:
-            entry_offset[(t, item_id)] = data_start + 16 * len(entry_offset)
+        for item_id, data in items:
+            for n in range(len(langs(data))):
+                entry_offset[(t, item_id, n)] = data_start + 16 * len(entry_offset)
     blob_start = data_start + 16 * len(entry_offset)
 
     directory([(t, 0x80000000 | type_dir) for t, type_dir, _ in plan])
     for index, (t, type_dir, items) in enumerate(plan):
-        entries = [(item_id, 0x80000000 | (type_dir if cycle and index == 0 else lang_dirs[(t, item_id)]))
+        entries = [(item_id, entry_offset[(t, item_id, 0)] if flat and index == 0 else
+                    0x80000000 | (type_dir if cycle and index == 0 else lang_dirs[(t, item_id)]))
                    for item_id, _ in items]
         if named and index == 0:
             entries = [('name', 0x80000000 | lang_dirs[(t, items[0][0])])] + entries
         directory(entries)
     for t, _, items in plan:
-        for item_id, _ in items:
-            directory([(1033, entry_offset[(t, item_id)])])
+        for item_id, data in items:
+            directory([(1033 + n, entry_offset[(t, item_id, n)]) for n in range(len(langs(data)))])
     for t, _, items in plan:
         for item_id, data in items:
-            data_entries.append((rva + blob_start + len(blobs) + bad_offset,
-                                 0x7fffffff if huge else len(data)))
-            blobs.extend(data)
-            blobs.extend(b'\0' * (-len(blobs) % 4))
+            for blob in langs(data):
+                data_entries.append((rva + blob_start + len(blobs) + bad_offset,
+                                     0x7fffffff if huge else len(blob)))
+                blobs.extend(blob)
+                blobs.extend(b'\0' * (-len(blobs) % 4))
     for data_rva, size in data_entries:
         dirs.extend(struct.pack('<IIII', data_rva, size, 0, 0))
     assert len(dirs) == blob_start, (len(dirs), blob_start)
@@ -151,9 +158,9 @@ def resource_section(resources, rva, cycle=False, named=False, huge=False, bad_o
 
 
 def pe(resources, pe32=False, cycle=False, named=False, huge=False, no_rsrc=False, rva_outside=False,
-       rva_below=False, bad_offset=0, many=False):
+       rva_below=False, bad_offset=0, many=False, flat=False):
     rva = 0x1000
-    section = resource_section(resources, rva, cycle, named, huge, bad_offset, many) if resources else b''
+    section = resource_section(resources, rva, cycle, named, huge, bad_offset, many, flat) if resources else b''
     raw = 0x200
     opt_size = 224 if pe32 else 240
     dirs_at = 96 if pe32 else 112
@@ -201,6 +208,11 @@ def main(out_dir):
         # Version strings only / empty values.
         'versiononly.exe': pe({RT_VERSION: [(1, version({'ProductName': ' ', 'FileDescription': 'Described'}))]}),
         'novalue.exe': pe({RT_VERSION: [(1, version({'ProductName': ''}))]}),
+        # One version per language, the first one's product name empty and
+        # broken past its end (bg3.exe), its description a file name.
+        'languages.exe': pe({RT_VERSION: [(1, [version({'ProductName': ' \x000\x10', 'FileDescription': 'game.exe'}),
+                                                version({'ProductName': "Baldur's Gate 3"})])]}),
+        'flat.exe': pe({RT_VERSION: [(1, version({'ProductName': 'Flat Name'}))]}, flat=True),
         # Hostile tables.
         'cycle.exe': pe({RT_GROUP_ICON: [(1, group([(32, 32, 1)]))], RT_ICON: [(1, dib(32, 32))]}, cycle=True),
         'huge.exe': pe({RT_GROUP_ICON: [(1, group([(32, 32, 1)]))], RT_ICON: [(1, dib(32, 32))],

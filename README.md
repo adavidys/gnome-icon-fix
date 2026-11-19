@@ -55,6 +55,8 @@ The **General** tab of the preferences sets, for windows GNOME can't place by it
 
 By default icons come from .desktop, then Application, then Default, and names from Application first, then .desktop, then Default. A game whose shortcut was found stays on it in the dock either way, showing the icon and name the order gives while it runs. With Default first for both, Icon Fix leaves such windows as GNOME has them.
 
+The dock, Alt+Tab and the overview always show the same name. A game that renames its own window once it has read your language (The Last of Us™ Part I becoming «Одни из нас™: Часть I») is followed everywhere; a title that only adds to the name (a resolution, a renderer, an FPS counter) is not.
+
 ### Rounded icons
 
 Icons taken from a game's `.exe`, Steam's library and many AppImages are plain squares, which look out of place next to GNOME's rounded icons. Under **Appearance** in the **General** tab, **Round square icons** (on by default) rounds their corners like GNOME's own square app icons, by 16 % of the icon's side; **Corner radius** sets how much (1–50 %). It applies to the icons Icon Fix shows for windows and to the icons of launchers' game shortcuts. Icons with transparent corners already have a shape of their own and stay as they are. The rounded copies are kept in `~/.cache/icon-fix/rounded`.

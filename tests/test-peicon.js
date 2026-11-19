@@ -2,7 +2,7 @@ import GdkPixbuf from 'gi://GdkPixbuf';
 import GLib from 'gi://GLib';
 
 import {HOME, PE, eq, ok, test} from './harness.js';
-import {exeIcon, exeInfo, forgetRead} from '../src/lib/peicon.js';
+import {exeIcon, exeInfo, forgetRead, productName} from '../src/lib/peicon.js';
 
 const OUT = `${HOME}/peicon-out`;
 
@@ -34,6 +34,8 @@ test('peicon: icons of every supported kind, names from version info', () => {
         'versiononly.exe': ['Described', null],
         'noimage.exe': ['Name Only', null],
         'novalue.exe': [null, null],
+        'languages.exe': ["Baldur's Gate 3", null],
+        'flat.exe': ['Flat Name', null],
         'bigbmp.exe': [null, null],
         'cycle.exe': [null, null],
         'huge.exe': [null, null],
@@ -126,4 +128,11 @@ test('peicon: what a program holds is saved for the next session', () => {
         GLib.chmod(cache, 0o755);
     }
     ok(!GLib.file_test(saved, GLib.FileTest.EXISTS));
+});
+
+test('peicon: names that aren\'t names', () => {
+    eq(productName('\x000\x10'), null, 'broken version info (bg3.exe)');
+    eq(productName(' Baldur\'s\u200B Gate 3 \x00'), "Baldur's Gate 3");
+    eq(productName('123'), null, 'no letter');
+    eq(productName(null), null);
 });

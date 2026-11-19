@@ -102,7 +102,8 @@ test('exe: entry icons and fallbacks', () => {
     eq(e.fallback(ctx({proc: {pid: 0, argv: ['/usr/bin/x'], exe: '/usr/bin/x', cwd: '/', env: {}}})), null, 'not Wine');
     eq(e.fallback(wine({})).name, 'Png Game', 'product name');
     eq(e.fallback(ctx({proc: {pid: 0, argv: [`Z:${GAME_DIR.replace(/\//g, '\\')}\\Tool "Pro".exe`], exe: '/usr/bin/wine', cwd: '/', env: {}}})).name, 'Thirty Two');
-    eq(e.fallback(ctx({proc: {pid: 0, argv: [`${HOME}/.wine-game/drive_c/Game/game.exe`], exe: '/usr/bin/wine', cwd: '/', env: {}}})).name, 'game', 'file name');
+    const named = e.fallback(ctx({proc: {pid: 0, argv: [`${HOME}/.wine-game/drive_c/Game/game.exe`], exe: '/usr/bin/wine', cwd: '/', env: {}}}));
+    eq([named.name, named.fileName], [null, 'game'], 'no product name: its file name, kept apart');
     eq(e.fallback(ctx({proc: {pid: 0, argv: ['C:\\nope.exe'], exe: '/usr/bin/wine', cwd: '/', env: {}}})), null, 'no .exe');
     eq(e.fallback(ctx({proc: {pid: 0, argv: ['Z:\\missing\\x.exe'], exe: '/usr/bin/wine', cwd: '/', env: {}}})), null, '.exe gone');
     eq(e.fallback(ctx({proc: {pid: 0, argv: [`${GAME_DIR}/Broken.exe`], exe: '/usr/bin/wine', cwd: '/', env: {}}})), null, 'not a program');

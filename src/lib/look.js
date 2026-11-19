@@ -38,19 +38,30 @@ export function cleanTitle(title) {
     return (title ?? '').replace(INVISIBLE, '').replace(/\s+/g, ' ').trim();
 }
 
-// Letters and digits only, lowercased: "osu!lazer" -> "osulazer".
+// Letters and digits only, lowercased: "The Last of Us™ Part I" ->
+// "thelastofuspart1".
 function letters(str) {
-    return str.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+    return (str ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+// The name a game gives its own window when that is another name for it
+// than name: a translation it switches to once it has read its language
+// ("The Last of Us™ Part I", a few seconds later "Одни из нас™: Часть I").
+// null when the title is the name, a part of it ("osu!" for osu!lazer) or
+// holds it among other things (a resolution, a renderer, an FPS counter:
+// "Baldur's Gate 3 (1920x1080) - (Vulkan)"), and without a name.
+export function titleName(title, name) {
+    const clean = cleanTitle(title);
+    const own = letters(clean);
+    const known = letters(name);
+    return own && known && !known.includes(own) && !own.includes(known) ? clean : null;
 }
 
 // What a window Icon Fix placed is called in the window switcher, the
-// overview and window lists, so that they agree with the dock: the app's
-// name when the title says nothing more ("osu!" for osu!lazer, "THE
-// FINALS" with hidden characters), else the title, cleaned (a document's
-// name, a level...).
+// overview and window lists: its app's name, as the dock has it, so every
+// one of them agrees (a game's own title is "osu!" for osu!lazer, "Baldur's
+// Gate 3 (1920x1080) - (Vulkan)", or full of hidden characters). Without a
+// name, the title cleaned.
 export function shownTitle(title, name) {
-    const clean = cleanTitle(title);
-    if (!name)
-        return clean;
-    return !letters(clean) || letters(name).includes(letters(clean)) ? name : clean;
+    return name || cleanTitle(title);
 }

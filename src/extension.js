@@ -20,13 +20,13 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Tracer, clearTrace} from './debug/trace.js';
 import {AppIndex, parseExec, tryCall} from './lib/appindex.js';
 import * as log from './lib/log.js';
-import {pick, shownTitle} from './lib/look.js';
+import {pick, shownTitle, titleName} from './lib/look.js';
 import {forgetBundles} from './lib/bundle.js';
 import {leavesSandbox, matchTitle, matchWindow} from './lib/matcher.js';
 import {forgetRead} from './lib/peicon.js';
 import {readProcess} from './lib/process.js';
 import {forgetRounded, roundedIcon} from './lib/shape.js';
-import {cacheDir, copyByContent, findPixmap, findSandboxedIcon, normalize} from './lib/util.js';
+import {cacheDir, copyByContent, findPixmap, findSandboxedIcon} from './lib/util.js';
 import {MIRRORS} from './mirror/registry.js';
 import {createSources, envKeys} from './sources/registry.js';
 import {WindowSplitter} from './split.js';
@@ -398,11 +398,11 @@ export default class IconFixExtension extends Extension {
         // name are both to come from .desktop; else what the order says.
         const entry = found.primary ?? this._realize(matchTitle(this._index, title, found.launcher));
         this._place(entry?.app);
-        const look = this._choose(entry?.app ?? null, found.fallbacks, app);
+        const look = this._choose(entry?.app ?? null, found.fallbacks, app, title);
         let result = look;
         if (look.iconKind === 'default' && look.nameKind === 'default')
             result = null;
-        else if (entry && look.iconKind === 'desktop' && look.nameKind === 'desktop')
+        else if (entry && look.iconKind === 'desktop' && look.nameKind === 'desktop' && !look.titled)
             result = entry;
         // The window goes to its entry (split.js), which shows the same;
         // with GNOME's own icon and name both first, it stays as GNOME has it.
@@ -546,26 +546,29 @@ export default class IconFixExtension extends Extension {
     // .desktop is its entry's icon and name, or without one what its
     // launcher knows (the sources' fallbacks); .exe what its program
     // holds; default GNOME's own, for host (the app GNOME gave it).
-    // {gicon, name, tag, iconKind, nameKind}: null for GNOME's own; whole:
-    // the same with GNOME's own filled in.
-    _choose(entryApp, fallbacks, host) {
+    // A name the window's own title gives instead (lib/look.js
+    // titleName()) wins over it, so that the dock follows the game when it
+    // changes it. {gicon, name, tag, iconKind, nameKind, titled}: null for
+    // GNOME's own; whole: the same with GNOME's own filled in.
+    _choose(entryApp, fallbacks, host, title = null) {
         const shown = fallbacks.map(f => ({exe: f.source === 'exe', look: this._realize(f)})).filter(f => f.look);
         const first = (exe, key) => shown.filter(f => f.exe === exe).map(f => f.look[key]).find(Boolean) ?? null;
         const icon = pick(this._iconOrder, {
             desktop: entryApp ? this._entryIcon(entryApp)?.gicon ?? this._gnomeIcon(entryApp) : first(false, 'gicon'),
             exe: first(true, 'gicon'),
         });
+        // The program's file name only when nothing else names it.
         const desktopName = entryApp ? this._gnomeName(entryApp) : first(false, 'name');
-        const exeName = first(true, 'name');
-        // The same name, as a file is named ("deadlock" for Deadlock): as the
-        // .desktop writes it.
         const name = pick(this._nameOrder, {
             desktop: desktopName,
-            exe: exeName && normalize(exeName) === normalize(desktopName) ? desktopName : exeName,
+            exe: first(true, 'name') ?? (desktopName ? null : first(true, 'fileName')),
         });
+        const titled = titleName(title, name.value);
+        if (titled)
+            name.value = titled;
         const tag = `${icon.kind}:${icon.value?.to_string()}\n${name.kind}:${name.value}`;
         return {
-            gicon: icon.value, name: name.value, tag, iconKind: icon.kind, nameKind: name.kind,
+            gicon: icon.value, name: name.value, tag, iconKind: icon.kind, nameKind: name.kind, titled: !!titled,
             whole: {gicon: icon.value ?? this._gnomeIcon(host), name: name.value ?? this._gnomeName(host), tag},
         };
     }
@@ -616,7 +619,7 @@ export default class IconFixExtension extends Extension {
         const title = primary || inSandbox ? null : matchTitle(this._index, this._rawTitle(win), launcher);
         const headId = primary?.id ?? title?.id ?? null;
         const entryApp = headId ? this._appSystem.lookup_app(headId) : null;
-        const look = this._choose(entryApp, fallbacks, app);
+        const look = this._choose(entryApp, fallbacks, app, inSandbox ? null : this._rawTitle(win));
         // Nothing is used with GNOME's own icon and name both first, nor for
         // a sandboxed window without an entry unless a launcher started it
         // and it has an icon and a name (it gets an entry of its own only
@@ -627,19 +630,24 @@ export default class IconFixExtension extends Extension {
         const head = headId ? [{source: primary?.by ?? 'window title', kind: 'entry', id: headId,
             name: entryApp ? this._gnomeName(entryApp) : null,
             icon: entryApp ? toString(this._entryIcon(entryApp)?.gicon ?? this._gnomeIcon(entryApp)) : null,
-            usesName: shown && look.nameKind === 'desktop', usesIcon: shown && look.iconKind === 'desktop',
+            usesName: shown && !look.titled && look.nameKind === 'desktop', usesIcon: shown && look.iconKind === 'desktop',
             missing: !entryApp}] : [];
+        // The game's own title, when it names it otherwise.
+        const retitled = look.titled ? [{source: 'window title', kind: 'title', name: look.name, icon: null,
+            usesName: shown, usesIcon: false, missing: false}] : [];
         // Only the first icon and name of each kind can be the one shown.
         const taken = {desktop: {icon: !!headId, name: !!headId}, exe: {icon: false, name: false}};
-        const listed = [...head, ...fallbacks.map(f => {
+        const listed = [...retitled, ...head, ...fallbacks.map(f => {
             const kind = f.source === 'exe' ? 'exe' : 'desktop';
             const icon = toString(this._realize(f)?.gicon);
-            const out = {source: f.source, kind: 'fallback', name: f.name ?? null,
+            // The program's file name, when it is the name shown.
+            const name = f.name ?? (f.fileName && f.fileName === look.name ? f.fileName : null);
+            const out = {source: f.source, kind: 'fallback', name,
                 icon: icon ?? f.icon ?? ([f.iconName ?? []].flat().join(' ') || null),
-                usesName: shown && !!f.name && !taken[kind].name && look.nameKind === kind,
+                usesName: shown && !look.titled && !!name && !taken[kind].name && look.nameKind === kind,
                 usesIcon: shown && !!icon && !taken[kind].icon && look.iconKind === kind,
                 missing: !icon && !!(f.icon || f.iconName)};
-            taken[kind].name ||= !!f.name;
+            taken[kind].name ||= !!name;
             taken[kind].icon ||= !!icon;
             return out;
         })];

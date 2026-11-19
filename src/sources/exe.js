@@ -28,9 +28,10 @@ export class ExeSource {
         const info = path && exeInfo(path);
         if (!info)
             return null;
-        // Without a product name, the file name is still better than the
-        // launcher's ("Hollow Knight Silksong.exe" -> "Hollow Knight Silksong").
-        return {icon: info.icon, name: info.name ?? stripExt(basename(path))};
+        // Without a product name, the file name: better than the launcher's
+        // ("Hollow Knight Silksong.exe" -> "Hollow Knight Silksong"), but not
+        // than a name anything else has ("bg3", "deadlock"; extension.js).
+        return {icon: info.icon, name: info.name, fileName: stripExt(basename(path))};
     }
 
     // The .exe the process has mapped comes first in ctx.paths.
